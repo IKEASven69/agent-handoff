@@ -1,0 +1,296 @@
+/**
+ * 迷你 YAML 子集解析/输出：只覆盖本协议 frontmatter 用到的形态——
+ * 标量、一层嵌套 map、flow map `{a: b}`、flow 列表 `[a, b]`、
+ * 块式字符串数组、块式对象数组（tasks）。不引 yaml 包（零依赖纪律）。
+ */
+
+export type YamlValue = string | number | boolean | null | YamlValue[] | { [k: string]: YamlValue }
+
+interface Line {
+  indent: number
+  text: string
+}
+
+/** 去掉空行与整行注释，记录缩进 */
+function linesOf(src: string): Line[] {
+  const out: Line[] = []
+  for (const raw of src.split(/\r?\n/)) {
+    if (raw.trim() === '') continue
+    const text = raw.trimStart()
+    if (text.startsWith('#')) continue
+    out.push({ indent: raw.length - text.length, text })
+  }
+  return out
+}
+
+/** 解析 frontmatter 文本为顶层 map */
+export function yamlParse(src: string): Record<string, YamlValue> {
+  const lines = linesOf(src)
+  if (lines.length === 0) return {}
+  const [v] = parseBlock(lines, 0, lines[0].indent)
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) {
+    throw new Error('frontmatter 顶层必须是键值对')
+  }
+  return v as Record<string, YamlValue>
+}
+
+function parseBlock(lines: Line[], i: number, indent: number): [YamlValue, number] {
+  if (i >= lines.length) return [null, i]
+  if (lines[i].text.startsWith('- ') || lines[i].text === '-') return parseList(lines, i, indent)
+  return parseMap(lines, i, indent)
+}
+
+/** 键行：`key:` 或 `key: value`，key 不含冒号 */
+const KEY_LINE = /^([^:]+?):(?:\s+(.*))?$/
+
+function isKeyLine(s: string): boolean {
+  return KEY_LINE.test(s) && !s.startsWith('{')
+}
+
+function parseMap(lines: Line[], start: number, indent: number): [Record<string, YamlValue>, number] {
+  const obj: Record<string, YamlValue> = {}
+  let i = start
+  while (i < lines.length) {
+    const ln = lines[i]
+    if (ln.indent < indent) break
+    if (ln.indent > indent) throw new Error(`YAML 缩进错误：${ln.text}`)
+    if (ln.text.startsWith('- ') || ln.text === '-') break // 列表交还上层
+    const m = KEY_LINE.exec(ln.text)
+    if (!m) throw new Error(`YAML 行无法解析：${ln.text}`)
+    const key = unquote(m[1].trim())
+    const rest = m[2]
+    if (rest === undefined) {
+      // 值在后续更深缩进的块里，或为 null
+      if (i + 1 < lines.length && lines[i + 1].indent > indent) {
+        const [v, ni] = parseBlock(lines, i + 1, lines[i + 1].indent)
+        obj[key] = v
+        i = ni
+      } else {
+        obj[key] = null
+        i++
+      }
+    } else {
+      obj[key] = parseInline(rest)
+      i++
+    }
+  }
+  return [obj, i]
+}
+
+function parseList(lines: Line[], start: number, indent: number): [YamlValue[], number] {
+  const arr: YamlValue[] = []
+  let i = start
+  while (i < lines.length) {
+    const ln = lines[i]
+    if (ln.indent < indent) break
+    if (ln.indent > indent) throw new Error(`YAML 列表缩进错误：${ln.text}`)
+    if (!ln.text.startsWith('- ') && ln.text !== '-') break
+    const dash = ln.text === '-' ? '' : ln.text.slice(2)
+    if (dash === '') {
+      // 嵌套块（更深缩进）
+      if (i + 1 < lines.length && lines[i + 1].indent > ln.indent) {
+        const [v, ni] = parseBlock(lines, i + 1, lines[i + 1].indent)
+        arr.push(v)
+        i = ni
+      } else {
+        arr.push(null)
+        i++
+      }
+    } else if (isKeyLine(dash)) {
+      // 对象数组项：`- key: value` + 后续更深缩进的同项键
+      const sub: Line[] = [{ indent: ln.indent + 2, text: dash }]
+      let j = i + 1
+      while (j < lines.length && lines[j].indent > ln.indent) {
+        sub.push(lines[j])
+        j++
+      }
+      const [v] = parseMap(sub, 0, ln.indent + 2)
+      arr.push(v)
+      i = j
+    } else {
+      arr.push(parseInline(dash))
+      i++
+    }
+  }
+  return [arr, i]
+}
+
+/** 解析行内值：flow map / flow 列表 / 引号字符串 / 数字 / 布尔 / 裸字符串 */
+function parseInline(raw: string): YamlValue {
+  const s = raw.trim()
+  if (s.startsWith('{')) return parseFlowMap(s)
+  if (s.startsWith('[')) return parseFlowList(s)
+  if (s.startsWith('"')) return parseDoubleQuoted(s)
+  if (s.startsWith("'")) return parseSingleQuoted(s)
+  const bare = stripComment(s)
+  if (bare === '' || bare === '~' || bare === 'null') return null
+  if (bare === 'true') return true
+  if (bare === 'false') return false
+  if (/^-?\d+$/.test(bare)) return parseInt(bare, 10)
+  if (/^-?\d*\.\d+$/.test(bare)) return parseFloat(bare)
+  return bare
+}
+
+/** 裸标量去掉行尾注释（` #...`） */
+function stripComment(s: string): string {
+  const at = s.indexOf(' #')
+  return (at === -1 ? s : s.slice(0, at)).trim()
+}
+
+/** 顶层逗号切分（尊重引号与 {}[] 嵌套） */
+function splitTopLevel(s: string, sep: string): string[] {
+  const out: string[] = []
+  let depth = 0
+  let quote: string | null = null
+  let cur = ''
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i]
+    if (quote === '"') {
+      cur += c
+      if (c === '\\') {
+        cur += s[++i] ?? ''
+      } else if (c === '"') quote = null
+      continue
+    }
+    if (quote === "'") {
+      cur += c
+      if (c === "'") quote = null
+      continue
+    }
+    if (c === '"' || c === "'") {
+      quote = c
+      cur += c
+    } else if (c === '{' || c === '[') {
+      depth++
+      cur += c
+    } else if (c === '}' || c === ']') {
+      depth--
+      cur += c
+    } else if (c === sep && depth === 0) {
+      out.push(cur)
+      cur = ''
+    } else {
+      cur += c
+    }
+  }
+  if (cur.trim() !== '') out.push(cur)
+  return out
+}
+
+function parseFlowMap(s: string): Record<string, YamlValue> {
+  const end = s.lastIndexOf('}')
+  if (end === -1) throw new Error(`flow map 缺少 }：${s}`)
+  const inner = s.slice(1, end)
+  const obj: Record<string, YamlValue> = {}
+  for (const entry of splitTopLevel(inner, ',')) {
+    const colon = entry.indexOf(':')
+    if (colon === -1) throw new Error(`flow map 项无法解析：${entry}`)
+    const key = unquote(entry.slice(0, colon).trim())
+    const val = entry.slice(colon + 1).trim()
+    obj[key] = val === '' ? null : parseInline(val)
+  }
+  return obj
+}
+
+function parseFlowList(s: string): YamlValue[] {
+  const end = s.lastIndexOf(']')
+  if (end === -1) throw new Error(`flow 列表缺少 ]：${s}`)
+  const inner = s.slice(1, end).trim()
+  if (inner === '') return []
+  return splitTopLevel(inner, ',').map(x => parseInline(x))
+}
+
+function parseDoubleQuoted(s: string): string {
+  let out = ''
+  let i = 1
+  for (; i < s.length; i++) {
+    const c = s[i]
+    if (c === '\\' && i + 1 < s.length) {
+      const n = s[++i]
+      out += n === 'n' ? '\n' : n === 't' ? '\t' : n // \" \\ \/ 等原样取转义后字符
+    } else if (c === '"') {
+      return out
+    } else {
+      out += c
+    }
+  }
+  throw new Error('双引号字符串未闭合')
+}
+
+function parseSingleQuoted(s: string): string {
+  const end = s.indexOf("'", 1)
+  if (end === -1) throw new Error('单引号字符串未闭合')
+  return s.slice(1, end).replace(/''/g, "'")
+}
+
+function unquote(s: string): string {
+  if (s.startsWith('"')) return parseDoubleQuoted(s)
+  if (s.startsWith("'")) return parseSingleQuoted(s)
+  return s
+}
+
+// ---------- 输出 ----------
+
+const isScalar = (v: YamlValue | undefined): v is string | number | boolean | null =>
+  v === null || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'
+
+/** 裸写会歧义就加双引号（过度加引号是安全的，解析器认） */
+function needsQuote(s: string): boolean {
+  if (s === '') return true
+  if (/^\s|\s$/.test(s)) return true
+  if (/^(true|false|null|~)$/.test(s)) return true
+  if (/^-?[\d.]+$/.test(s)) return true
+  return /[:"'#{}[\],&*!|>%@`?]/.test(s) || s.startsWith('-')
+}
+
+function emitScalar(v: string | number | boolean | null): string {
+  if (v === null) return ''
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v)
+  if (!needsQuote(v)) return v
+  return `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`
+}
+
+function emitMap(obj: Record<string, YamlValue>, indent: number): string[] {
+  const pad = ' '.repeat(indent)
+  const out: string[] = []
+  for (const [k, raw] of Object.entries(obj)) {
+    if (raw === undefined) continue
+    const v = raw as YamlValue
+    if (isScalar(v)) {
+      out.push(`${pad}${k}: ${emitScalar(v)}`.trimEnd())
+    } else if (Array.isArray(v)) {
+      if (v.length === 0) {
+        out.push(`${pad}${k}: []`)
+      } else if (v.every(x => isScalar(x as YamlValue))) {
+        out.push(`${pad}${k}:`)
+        for (const x of v) out.push(`${pad}  - ${emitScalar(x as string)}`)
+      } else {
+        // 对象数组：首键与 - 同行，其余键对齐
+        out.push(`${pad}${k}:`)
+        for (const item of v) {
+          const entries = Object.entries(item as Record<string, YamlValue>).filter(
+            ([, val]) => val !== undefined,
+          )
+          entries.forEach(([ek, ev], idx) => {
+            const prefix = idx === 0 ? `${pad}  - ` : `${pad}    `
+            if (isScalar(ev as YamlValue)) {
+              out.push(`${prefix}${ek}: ${emitScalar(ev as string)}`.trimEnd())
+            } else {
+              out.push(`${prefix}${ek}:`)
+              out.push(...emitMap(ev as Record<string, YamlValue>, indent + 6))
+            }
+          })
+        }
+      }
+    } else {
+      out.push(`${pad}${k}:`)
+      out.push(...emitMap(v as Record<string, YamlValue>, indent + 2))
+    }
+  }
+  return out
+}
+
+/** 块式 YAML 输出（不带 --- 边界） */
+export function yamlEmit(obj: Record<string, YamlValue>): string {
+  return emitMap(obj, 0).join('\n')
+}
