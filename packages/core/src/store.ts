@@ -11,7 +11,7 @@ import {
 } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { generateId, parseCardLenient, renderCard } from './card.js'
+import { assertSafeId, generateId, parseCardLenient, renderCard } from './card.js'
 import type { Card } from './types.js'
 
 /** archived 滚动保留份数（SPEC 第一节） */
@@ -28,6 +28,7 @@ export const archivedDir = (dir?: string): string => join(resolveHome(dir), 'arc
 /** 渲染卡片写入 pending/，返回文件路径 */
 export function writeCard(card: Card, dir?: string): string {
   const id = card.id || generateId()
+  assertSafeId(id) // 外来 id 不过闸不落盘（防路径穿越）
   card.id = id
   const pd = pendingDir(dir)
   mkdirSync(pd, { recursive: true })
@@ -60,6 +61,7 @@ export const listArchived = (dir?: string): Card[] => listDirCards(archivedDir(d
  * 二次取件同一 id 报错「收件箱无此待取件」。
  */
 export function loadCard(id: string, dir?: string): Card {
+  assertSafeId(id) // 外来 id 不过闸不拼路径（防路径穿越）
   const src = join(pendingDir(dir), `${id}.md`)
   if (!existsSync(src)) {
     throw new Error(`收件箱无此待取件：${id}（可能已取过——消费即弃）`)
@@ -68,7 +70,12 @@ export function loadCard(id: string, dir?: string): Card {
   const ad = archivedDir(dir)
   mkdirSync(ad, { recursive: true })
   renameSync(src, join(ad, `${id}.md`))
-  trimArchived(ad)
+  // 归档滚动是善后动作：失败只告警，不把「已成功归档」表现为失败
+  try {
+    trimArchived(ad)
+  } catch (e) {
+    console.warn(`archived 滚动清理失败（取件本身已成功）：${(e as Error).message}`)
+  }
   return card
 }
 

@@ -35,7 +35,8 @@ export function collectGitSnapshot(cwd: string): GitSnapshot {
   try {
     return {
       branch: git(cwd, ['branch', '--show-current']),
-      changed: porcelainPaths(git(cwd, ['status', '--porcelain'])),
+      // quotePath=false：中文等非 ASCII 路径不转八进制，原样输出
+      changed: porcelainPaths(git(cwd, ['-c', 'core.quotePath=false', 'status', '--porcelain'])),
     }
   } catch {
     return { branch: '', changed: [] }
@@ -53,7 +54,7 @@ export function verifyGit(card: Card): GitVerifyResult {
   let changed: string[]
   try {
     branch = git(cwd, ['branch', '--show-current'])
-    changed = porcelainPaths(git(cwd, ['status', '--porcelain']))
+    changed = porcelainPaths(git(cwd, ['-c', 'core.quotePath=false', 'status', '--porcelain']))
   } catch (e) {
     const msg = (e as Error).message.split('\n')[0]
     return { mismatches: [], unavailable: `git 核验失败（${cwd} 可能不是 git 仓库）：${msg}（UNAVAILABLE）` }

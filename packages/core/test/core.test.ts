@@ -1,11 +1,13 @@
 /** core 测试：node:test + node:assert，tsx 跑源码 */
-import { test } from 'node:test'
+import { mock, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  archivedDir,
+  collectGitSnapshot,
   generateId,
   listArchived,
   listPending,
@@ -92,7 +94,7 @@ test('archived 滚动保留 50 份', () => {
   const home = tmpHome()
   for (let i = 0; i < 55; i++) {
     const card = sampleCard()
-    card.id = `${generateId()}-${i.toString(36).padStart(2, '0')}`
+    card.id = `ho-${(1788887000000 + i).toString(36)}-${i.toString(36).padStart(4, '0')}`
     card.pushed_at = new Date(1788887000000 + i * 1000).toISOString()
     writeCard(card, home)
   }
@@ -255,4 +257,96 @@ test('listPending 按推送时间倒序', () => {
 test('文件名规则：ho-<时间戳36进制>-<随机4位>', () => {
   const id = generateId()
   assert.match(id, /^ho-[a-z0-9]+-[a-z0-9]{4}$/)
+})
+
+// ---------- 代码审查回归（🔴1/🔴2/🟡3/🟡4/🟡5 + 顺手修） ----------
+
+test('回归🔴1：带引号且含冒号的字符串列表项回读不炸（isKeyLine 不误判）', () => {
+  const card = sampleCard()
+  card.git = { branch: 'main', changed: ['weird: name.ts', 'plain.ts'] }
+  const back = parseCard(renderCard(card))
+  assert.deepEqual(back.git.changed, ['weird: name.ts', 'plain.ts'])
+})
+
+test('回归🔴2：含换行的标量加引号转义，emit→parse 往返保真', () => {
+  const card = sampleCard()
+  card.tasks = [{ text: 'a\nb', status: 'pending' }]
+  const back = parseCard(renderCard(card))
+  assert.equal(back.tasks[0]!.text, 'a\nb')
+  // 整卡：正文「做到哪」段带换行候选 + 任务带换行，write→parse 往返
+  const home = tmpHome()
+  card.sections.done = '- 第一行\n  第二行续行\n- 另一条候选'
+  const p = writeCard(card, home)
+  const back2 = parseCard(readFileSync(p, 'utf-8'))
+  assert.equal(back2.sections.done, card.sections.done)
+  assert.equal(back2.tasks[0]!.text, 'a\nb')
+})
+
+test('回归🟡3：loadCard/writeCard 拒绝外来 id（路径穿越闸）', () => {
+  const home = tmpHome()
+  assert.throws(() => loadCard('../../x', home), /非法卡片 id/)
+  const card = sampleCard()
+  card.id = '../../x'
+  assert.throws(() => writeCard(card, home), /非法卡片 id/)
+  assert.ok(!existsSync(join(home, '..', '..', 'x.md')))
+  // 宽松模式：外来文件名 id 不合规就重新生成，不沿用
+  const c = parseCardLenient('## 目标\n\nx\n', { filename: '../../x.md' })
+  assert.match(c.id, /^ho-[a-z0-9]+-[a-z0-9]{4}$/)
+  const c2 = parseCardLenient('## 目标\n\nx\n', { filename: 'ho-NotSafe.md' })
+  assert.match(c2.id, /^ho-[a-z0-9]+-[a-z0-9]{4}$/)
+  assert.notEqual(c2.id, 'ho-NotSafe')
+})
+
+test('回归🟡4：archived 滚动清理失败只告警，不影响 load 结果', () => {
+  const home = tmpHome()
+  const card = sampleCard()
+  writeCard(card, home)
+  // 造一个名为 .md 的目录，mtime 最旧，trim 时 rmSync 必抛
+  const ad = archivedDir(home)
+  mkdirSync(ad, { recursive: true })
+  for (let i = 0; i < 51; i++) writeFileSync(join(ad, `ho-f${i.toString(36)}-${i.toString(36).padStart(4, '0')}.md`), 'x')
+  const trap = join(ad, 'ho-trap0-0000.md')
+  mkdirSync(trap)
+  const past = new Date(2000, 0, 1)
+  utimesSync(trap, past, past)
+  const warn = mock.method(console, 'warn', () => {})
+  try {
+    const got = loadCard(card.id, home)
+    assert.equal(got.id, card.id, 'trim 抛错不影响取件结果')
+  } finally {
+    warn.mock.restore()
+  }
+  assert.equal(warn.mock.callCount(), 1, '失败只告警一次')
+  assert.ok(String(warn.mock.calls[0]!.arguments[0]).includes('滚动清理失败'))
+})
+
+test('回归🟡5：中文文件名快照不含八进制转义（core.quotePath=false）', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'handoff-repo-'))
+  const g = (args: string[]): string =>
+    execFileSync('git', ['-C', repo, ...args], { encoding: 'utf-8' }).trim()
+  g(['init', '-b', 'main'])
+  g(['config', 'user.email', 't@t.t'])
+  g(['config', 'user.name', 't'])
+  writeFileSync(join(repo, '中文文件.txt'), '中文')
+  const snap = collectGitSnapshot(repo)
+  assert.ok(snap.changed.includes('中文文件.txt'), `快照应含原样中文路径：${snap.changed.join(',')}`)
+  assert.ok(!snap.changed.some(f => f.includes('\\')), '不得含反斜杠转义')
+  // 核验端同口径：卡片记录中文路径，verifyGit 不报 MISMATCH
+  const card = sampleCard()
+  card.cwd = repo
+  card.git = snap
+  assert.deepEqual(verifyGit(card).mismatches, [])
+})
+
+test('顺手修：单引号字符串内 \'\' 转义按 YAML 规则解析', () => {
+  const c = parseCard(
+    ['---', 'id: ho-quote-0001', "from: { agent: a, session: 'it''s a ptr' }", '---', ''].join('\n'),
+  )
+  assert.equal(c.from.session, "it's a ptr")
+})
+
+test('顺手修：emitMap 拒绝含冒号的 key，不静默错位', () => {
+  const card = sampleCard()
+  card.extras = { 'bad:key': 'v' }
+  assert.throws(() => renderCard(card), /YAML 键无法安全输出/)
 })

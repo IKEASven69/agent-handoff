@@ -24,6 +24,16 @@ export function generateId(): string {
   return `ho-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
 }
 
+/** 合法卡片 id 形态（与文件名规则一致，拒绝路径穿越等外来 id） */
+export const SAFE_ID = /^ho-[a-z0-9]+-[a-z0-9]{4}$/
+
+/** id 入口闸：loadCard/writeCard 落盘前必过，不合规直接报中文错 */
+export function assertSafeId(id: string): void {
+  if (!SAFE_ID.test(id)) {
+    throw new Error(`非法卡片 id：${id}（只允许 ho-<小写字母或数字>-<4位小写字母或数字> 形态）`)
+  }
+}
+
 /** 拆分 frontmatter 与正文；无 frontmatter 返回 null */
 function splitFrontmatter(text: string): { front: string; body: string } | null {
   const m = /^\uFEFF?---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*\r?\n?([\s\S]*)$/.exec(text)
@@ -172,6 +182,7 @@ export function parseCardLenient(text: string, hint?: { filename?: string }): Ca
   const split = splitFrontmatter(text)
   if (split) return parseCard(text)
   const fromFile = hint?.filename?.replace(/\.md$/i, '')
-  const fallbackId = fromFile && /^ho-.+/.test(fromFile) ? fromFile : generateId()
+  // 外来文件名 id 也要过安全形态，不符合就重新生成而不是沿用
+  const fallbackId = fromFile !== undefined && SAFE_ID.test(fromFile) ? fromFile : generateId()
   return frontmatterToCard({}, parseSections(text), fallbackId)
 }

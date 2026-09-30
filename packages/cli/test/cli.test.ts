@@ -63,20 +63,23 @@ test('export-hippo：pending/archived 全转卡片，二次运行幂等跳过', 
   const fixture = {
     pending: [
       {
-        id: 'ho-e2e-pending01',
+        id: 'ho-e2e0-pend',
         from: { agent: 'zcode', sessionId: 'sess_x', title: '小说插件' },
         to: 'any',
         project: 'CodingProjects',
         cwd: 'D:\\CodingProjects',
         pushedAt: 1788887712.317,
         git: { branch: '', changed: [] },
-        activeTasks: [{ text: '进行中的事', status: 'in_progress', priority: 'high' }],
+        activeTasks: [
+          { text: '进行中的事', status: 'in_progress', priority: 'high' },
+          { text: '待办的事', status: 'pending', priority: 'mid' },
+        ],
         candidates: ['候选一', '候选二'],
       },
     ],
     archived: [
       {
-        id: 'ho-e2e-archived1',
+        id: 'ho-e2e0-arch',
         from: { agent: 'zcode', sessionId: 'sess_y', title: '旧会话' },
         to: 'any',
         project: 'p',
@@ -96,16 +99,44 @@ test('export-hippo：pending/archived 全转卡片，二次运行幂等跳过', 
   assert.ok(first.stdout.includes('pending 新增 1 份（跳过 0 份已存在）'))
   assert.ok(first.stdout.includes('archived 新增 1 份（跳过 0 份已存在）'))
 
-  // 映射断言：candidates 进「做到哪」、in_progress 进「还差什么」、固定读者警告
-  const cardText = readFileSync(join(home, 'pending', 'ho-e2e-pending01.md'), 'utf-8')
+  // 映射断言：candidates 进「做到哪」、pending + in_progress 都进「还差什么」、固定读者警告
+  const cardText = readFileSync(join(home, 'pending', 'ho-e2e0-pend.md'), 'utf-8')
   assert.ok(cardText.includes('session: sess_x'))
   assert.ok(cardText.includes('- 候选一'))
-  assert.ok(cardText.includes('- 进行中的事'))
+  const remaining = cardText.split('## 还差什么')[1]!.split('## 停在哪')[0]!
+  assert.ok(remaining.includes('- 进行中的事'))
+  assert.ok(remaining.includes('- 待办的事'), 'pending 也进「还差什么」')
   assert.ok(cardText.includes('候选为规则抽取的原始文本，未经蒸馏'))
 
   const second = run(home, ['export-hippo', '--file', fixturePath])
   assert.ok(second.stdout.includes('pending 新增 0 份（跳过 1 份已存在）'))
   assert.ok(second.stdout.includes('archived 新增 0 份（跳过 1 份已存在）'))
+})
+
+test('export-hippo：非法 id 跳过并告警，不拼路径', () => {
+  const home = tmpHome()
+  const fixture = {
+    pending: [
+      {
+        id: '../../evil',
+        from: { agent: 'x', sessionId: 's', title: 't' },
+        to: 'any',
+        project: 'p',
+        cwd: '/tmp',
+        pushedAt: 1788880000,
+        git: { branch: '', changed: [] },
+        activeTasks: [],
+        candidates: [],
+      },
+    ],
+    archived: [],
+  }
+  const fixturePath = join(home, 'inbox.json')
+  writeFileSync(fixturePath, JSON.stringify(fixture), 'utf-8')
+  const r = run(home, ['export-hippo', '--file', fixturePath])
+  assert.equal(r.code, 0, r.stderr)
+  assert.ok(r.stdout.includes('pending 新增 0 份'), '非法 id 不计入新增')
+  assert.ok(!existsSync(join(home, 'evil.md')), '不得写出 pending/ 之外')
 })
 
 test('push 缺必填参数报中文用法错', () => {

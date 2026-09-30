@@ -9,6 +9,7 @@ import { basename, join } from 'node:path'
 import { parseArgs } from 'node:util'
 import {
   archivedDir,
+  assertSafeId,
   collectGitSnapshot,
   generateId,
   listPending,
@@ -145,7 +146,7 @@ function hippoToCard(item: HippoItem): Card {
     status: (VALID_STATUS as string[]).includes(t.status) ? (t.status as TaskStatus) : 'pending',
     priority: t.priority,
   }))
-  const doing = tasks.filter(t => t.status === 'in_progress')
+  const open = tasks.filter(t => t.status !== 'completed') // 「还差什么」= pending + in_progress
   return {
     handoff: 1,
     id: item.id,
@@ -165,7 +166,7 @@ function hippoToCard(item: HippoItem): Card {
           ? item.candidates.map(c => `- ${c}`).join('\n')
           : '（无会话候选记录）',
       remaining:
-        doing.length > 0 ? doing.map(t => `- ${t.text}`).join('\n') : '（无 in_progress 任务）',
+        open.length > 0 ? open.map(t => `- ${t.text}`).join('\n') : '（无未完成任务）',
       stopped: `推送于 ${iso}；精确停止点请按 from.session 指针反查原文`,
       warnings: '候选为规则抽取的原始文本，未经蒸馏',
     },
@@ -186,7 +187,18 @@ function cmdExportHippo(args: string[]): void {
   mkdirSync(pd, { recursive: true })
   mkdirSync(ad, { recursive: true })
   let [pNew, pSkip, aNew, aSkip] = [0, 0, 0, 0]
+  /** 外来 id 过安全闸：不合规跳过并告警，不拼路径（防路径穿越） */
+  const safeId = (id: string): boolean => {
+    try {
+      assertSafeId(id)
+      return true
+    } catch (e) {
+      console.warn(`跳过非法 id（${(e as Error).message}）`)
+      return false
+    }
+  }
   for (const item of store.pending ?? []) {
+    if (!safeId(item.id)) continue
     const p = join(pd, `${item.id}.md`)
     if (existsSync(p)) {
       pSkip++
@@ -196,6 +208,7 @@ function cmdExportHippo(args: string[]): void {
     pNew++
   }
   for (const item of store.archived ?? []) {
+    if (!safeId(item.id)) continue
     const p = join(ad, `${item.id}.md`)
     if (existsSync(p)) {
       aSkip++

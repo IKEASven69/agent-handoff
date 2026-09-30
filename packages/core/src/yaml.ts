@@ -44,7 +44,8 @@ function parseBlock(lines: Line[], i: number, indent: number): [YamlValue, numbe
 const KEY_LINE = /^([^:]+?):(?:\s+(.*))?$/
 
 function isKeyLine(s: string): boolean {
-  return KEY_LINE.test(s) && !s.startsWith('{')
+  // 带引号的字符串列表项（如 `- "weird: name.ts"`）不是键值行
+  return KEY_LINE.test(s) && !s.startsWith('{') && !s.startsWith('"') && !s.startsWith("'")
 }
 
 function parseMap(lines: Line[], start: number, indent: number): [Record<string, YamlValue>, number] {
@@ -218,9 +219,21 @@ function parseDoubleQuoted(s: string): string {
 }
 
 function parseSingleQuoted(s: string): string {
-  const end = s.indexOf("'", 1)
-  if (end === -1) throw new Error('单引号字符串未闭合')
-  return s.slice(1, end).replace(/''/g, "'")
+  // YAML 单引号字符串里 '' 是转义的单个引号，不能见到第一个 ' 就收尾
+  let out = ''
+  for (let i = 1; i < s.length; i++) {
+    if (s[i] === "'") {
+      if (s[i + 1] === "'") {
+        out += "'"
+        i++
+      } else {
+        return out
+      }
+    } else {
+      out += s[i]
+    }
+  }
+  throw new Error('单引号字符串未闭合')
 }
 
 function unquote(s: string): string {
@@ -240,6 +253,8 @@ function needsQuote(s: string): boolean {
   if (/^\s|\s$/.test(s)) return true
   if (/^(true|false|null|~)$/.test(s)) return true
   if (/^-?[\d.]+$/.test(s)) return true
+  // 控制字符必须进引号走转义，否则裸写产出不可解析 YAML
+  if (/[\n\r\t]/.test(s)) return true
   return /[:"'#{}[\],&*!|>%@`?]/.test(s) || s.startsWith('-')
 }
 
@@ -250,40 +265,49 @@ function emitScalar(v: string | number | boolean | null): string {
   return `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`
 }
 
+/** key 校验：含冒号/空白/引号的 key 会在回读时静默错位，直接拒写（协议键均为安全形态） */
+const SAFE_KEY = /^[A-Za-z0-9_.\-]+$/
+function emitKey(k: string): string {
+  if (!SAFE_KEY.test(k)) throw new Error(`YAML 键无法安全输出：${k}（键只允许字母、数字、_ . -）`)
+  return k
+}
+
 function emitMap(obj: Record<string, YamlValue>, indent: number): string[] {
   const pad = ' '.repeat(indent)
   const out: string[] = []
   for (const [k, raw] of Object.entries(obj)) {
     if (raw === undefined) continue
+    const key = emitKey(k)
     const v = raw as YamlValue
     if (isScalar(v)) {
-      out.push(`${pad}${k}: ${emitScalar(v)}`.trimEnd())
+      out.push(`${pad}${key}: ${emitScalar(v)}`.trimEnd())
     } else if (Array.isArray(v)) {
       if (v.length === 0) {
-        out.push(`${pad}${k}: []`)
+        out.push(`${pad}${key}: []`)
       } else if (v.every(x => isScalar(x as YamlValue))) {
-        out.push(`${pad}${k}:`)
+        out.push(`${pad}${key}:`)
         for (const x of v) out.push(`${pad}  - ${emitScalar(x as string)}`)
       } else {
         // 对象数组：首键与 - 同行，其余键对齐
-        out.push(`${pad}${k}:`)
+        out.push(`${pad}${key}:`)
         for (const item of v) {
           const entries = Object.entries(item as Record<string, YamlValue>).filter(
             ([, val]) => val !== undefined,
           )
           entries.forEach(([ek, ev], idx) => {
+            const ekey = emitKey(ek)
             const prefix = idx === 0 ? `${pad}  - ` : `${pad}    `
             if (isScalar(ev as YamlValue)) {
-              out.push(`${prefix}${ek}: ${emitScalar(ev as string)}`.trimEnd())
+              out.push(`${prefix}${ekey}: ${emitScalar(ev as string)}`.trimEnd())
             } else {
-              out.push(`${prefix}${ek}:`)
+              out.push(`${prefix}${ekey}:`)
               out.push(...emitMap(ev as Record<string, YamlValue>, indent + 6))
             }
           })
         }
       }
     } else {
-      out.push(`${pad}${k}:`)
+      out.push(`${pad}${key}:`)
       out.push(...emitMap(v as Record<string, YamlValue>, indent + 2))
     }
   }
