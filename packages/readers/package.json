@@ -1,0 +1,30 @@
+{
+  "name": "@agent-handoff/readers",
+  "version": "0.1.0",
+  "description": "handoff 会话读取器：六家 agent（claude-code / codex / opencode / zcode / pi / workbuddy）的只读会话发现与解析，零三方运行时依赖",
+  "type": "module",
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "test": "node --import tsx --test test/readers.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "tsdown": "^0.23.0"
+  }
+}

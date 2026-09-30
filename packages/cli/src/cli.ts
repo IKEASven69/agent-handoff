@@ -23,6 +23,7 @@ import {
   type TaskSnapshot,
   type TaskStatus,
 } from '@agent-handoff/core'
+import { cmdPull, cmdSessions } from './sessions.js'
 
 /** 报错退出（面向用户的信息一律中文） */
 function die(msg: string): never {
@@ -38,7 +39,12 @@ const USAGE = `用法：
   handoff load <id>
       消费即弃：打印卡片全文 + git 核验警告
   handoff export-hippo [--file <路径>]
-      把 hippo 收件箱 JSON（默认 ~/.hippo/handoff-inbox.json）转成协议卡片（幂等）`
+      把 hippo 收件箱 JSON（默认 ~/.hippo/handoff-inbox.json）转成协议卡片（幂等）
+  handoff sessions [agent] [--filter <词>] [--limit <N>]
+      列出发现的会话（agent/标题/更新时间/轮数）；agent 支持 claude-code / codex / opencode / zcode / pi / workbuddy
+  handoff pull <agent> [reference]
+      读会话（id / id 前缀 / 路径 / 标题关键词，缺省 latest）→ 确定性骨架卡片写入 ~/.handoff/pending/；
+      匹配歧义时列候选，不猜`
 
 /** 读 stdin 全文 */
 async function readStdin(): Promise<string> {
@@ -239,6 +245,12 @@ async function main(): Promise<void> {
       break
     case 'export-hippo':
       cmdExportHippo(rest)
+      break
+    case 'sessions':
+      cmdSessions(rest)
+      break
+    case 'pull':
+      cmdPull(rest)
       break
     default:
       console.error(USAGE)

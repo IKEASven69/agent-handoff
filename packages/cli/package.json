@@ -10,14 +10,15 @@
     "dist"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "build": "tsdown",
     "test": "node --import tsx --test test/cli.test.ts"
   },
   "dependencies": {
-    "@agent-handoff/core": "workspace:*"
+    "@agent-handoff/core": "workspace:*",
+    "@agent-handoff/readers": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^26.6.3",
