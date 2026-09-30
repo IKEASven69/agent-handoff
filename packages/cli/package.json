@@ -4,7 +4,7 @@
   "description": "handoff: 1 协议命令行：push / inbox / load / export-hippo",
   "type": "module",
   "bin": {
-    "handoff": "./dist/cli.js"
+    "handoff": "./dist/cli.mjs"
   },
   "files": [
     "dist"
@@ -13,16 +13,16 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsup src/cli.ts --format esm --clean",
+    "build": "tsdown",
     "test": "node --import tsx --test test/cli.test.ts"
   },
   "dependencies": {
     "@agent-handoff/core": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^24.0.0",
-    "tsup": "^8.5.0",
-    "tsx": "^4.20.0",
-    "typescript": "^5.9.0"
+    "@types/node": "^26.6.3",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "tsdown": "^0.23.0"
   }
 }

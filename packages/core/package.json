@@ -3,12 +3,12 @@
   "version": "0.1.0",
   "description": "handoff: 1 协议的零依赖参考实现：卡片读写、~/.handoff 目录语义、git 核验",
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
     }
   },
   "files": [
@@ -18,13 +18,13 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts --clean",
+    "build": "tsdown",
     "test": "node --import tsx --test test/core.test.ts"
   },
   "devDependencies": {
-    "@types/node": "^24.0.0",
-    "tsup": "^8.5.0",
-    "tsx": "^4.20.0",
-    "typescript": "^5.9.0"
+    "@types/node": "^26.6.3",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "tsdown": "^0.23.0"
   }
 }

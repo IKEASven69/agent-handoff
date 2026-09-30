@@ -22,11 +22,11 @@ function run(home: string, args: string[], input?: string): RunResult {
     input,
   }
   try {
-    const stdout = execFileSync(process.execPath, ['--import', 'tsx', CLI, ...args], opts)
+    const stdout = String(execFileSync(process.execPath, ['--import', 'tsx', CLI, ...args], opts))
     return { stdout, stderr: '', code: 0 }
   } catch (e) {
-    const err = e as { stdout?: string; stderr?: string; status?: number }
-    return { stdout: err.stdout ?? '', stderr: err.stderr ?? '', code: err.status ?? 1 }
+    const err = e as { stdout?: string | Buffer; stderr?: string | Buffer; status?: number }
+    return { stdout: String(err.stdout ?? ''), stderr: String(err.stderr ?? ''), code: err.status ?? 1 }
   }
 }
 
