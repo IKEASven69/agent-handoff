@@ -61,7 +61,7 @@ tasks:                            # 未完成任务快照（可选）
 | `git.changed` | string[] | 否 | `[]` | 推送时刻 dirty 文件列表（`git status --porcelain` 口径） |
 | `tasks` | object[] | 否 | `[]` | 任务快照 `{ text, status, priority }`，`status ∈ pending \| in_progress \| completed` |
 
-### 正文六段（顺序固定，中文二级标题）
+### 正文段落（顺序固定，中文二级标题）：6 段必选 + 1 段可选「建议加载」
 
 1. `## 目标` —— 这个会话在做什么、最后一条用户请求是什么。
 2. `## 涉及文件` —— 碰过的文件/目录/命令。**计划文档只写路径**，不复制内容（语义 4）。
@@ -126,7 +126,7 @@ tasks:                            # 未完成任务快照（可选）
 
 | 来源 | 映射（已核实） |
 |---|---|
-| hippo inbox JSON | 字段一一对应；candidates 是 100 字硬截断原文，**需蒸馏层**才能填「做到哪/还差什么」（参考 CLI `export-hippo` 的兜底映射：candidates 进「做到哪」、in_progress 任务进「还差什么」、固定读者警告）；activeTasks → `tasks` 字段直接可用 |
+| hippo inbox JSON | 字段一一对应；candidates 是 100 字硬截断原文，**需蒸馏层**才能填「做到哪/还差什么」（参考 CLI `export-hippo` 的兜底映射：candidates 进「做到哪」、未完成（pending + in_progress）任务进「还差什么」、固定读者警告）；activeTasks → `tasks` 字段直接可用 |
 | dsh-resume 六段卡 | 卡片不落盘、是当轮文本；兼容 = 请它把卡片顺带写到 `~/.handoff/pending/`；六段标题与证据账本直接采用它的定义 |
 | Matt Pocock handoff | 无 frontmatter 纯 Markdown + 临时目录 → 宽松读取（语义 3）；redact / suggested-skills 两条义务已吸收进语义 5 |
 | dsh-handoff（npm 现有插件） | 单向导出 HANDOFF.md；可给它提 PR：导出时同时落一份协议卡片到 pending/ |
