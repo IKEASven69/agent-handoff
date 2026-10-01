@@ -1,6 +1,7 @@
 /**
- * readers 单测：六家适配器喂最小真实形态样例出预期 Turn 流；
- * zcode 用 node:sqlite 造临时库（零 better-sqlite3）；引用解析歧义返回候选。
+ * readers 单测：八家适配器喂最小真实形态样例出预期 Turn 流；
+ * zcode / cursor store 用 node:sqlite 造临时库（零 better-sqlite3）；引用解析歧义返回候选。
+ * cursor / grok 以 fixtures 为准（本机无真实安装，无实机验证）。
  * 运行：pnpm test（node --import tsx --test test/readers.test.ts）
  */
 import { test } from 'node:test'
@@ -18,10 +19,18 @@ import {
   parseOpenCodeSession,
   parseZcodeSession,
   parsePiText,
+  parseCursorTranscriptText,
+  parseCursorStore,
+  renderCursorValue,
+  decodeCursorBlob,
+  parseGrokSession,
+  parseGrokUpdatesText,
   type SessionRef,
 } from '../src/index.js'
 import { claudeAdapter } from '../src/claude.js'
 import { workbuddyAdapter } from '../src/workbuddy.js'
+import { cursorAdapter } from '../src/cursor.js'
+import { grokAdapter } from '../src/grok.js'
 
 function withTempDir<T>(fn: (dir: string) => T): T {
   const dir = mkdtempSync(join(tmpdir(), 'handoff-readers-'))
@@ -226,4 +235,184 @@ test('resolveReference: 路径匹配（文件系 id=绝对路径，尾段也可�
 test('listSessions/readSession: 未知 agent 抛错', () => {
   assert.throws(() => listSessions('not-an-agent'), /未知 agent/)
   assert.throws(() => readSession('not-an-agent', 'x'), /未知 agent/)
+})
+
+// ── cursor：transcript JSONL（role value 流，恢复边界纪律）───────────
+
+test('cursor_parse_transcript_text', () => {
+  const text = [
+    // 系统提示 / 前言 / 隐藏推理：整条跳过
+    JSON.stringify({ role: 'system', content: [{ type: 'text', text: '你是助手' }] }),
+    JSON.stringify({ role: 'preamble', content: 'preamble 注入' }),
+    JSON.stringify({ type: 'thinking', role: 'assistant', content: [{ type: 'text', text: '隐藏推理' }] }),
+    // user：<user_query> 抽取优先
+    JSON.stringify({ role: 'user', content: [{ type: 'text', text: '<environment_context>os: win</environment_context>\n<user_query> 修一下登录页 </user_query>' }] }),
+    // user：包装注入开头整条丢弃
+    JSON.stringify({ role: 'user', content: [{ type: 'text', text: '<user_instructions>注入指令</user_instructions>' }] }),
+    // assistant：生成元文本（XML 标签开头）丢弃，正常正文保留；thinking/signature 块跳过
+    JSON.stringify({ role: 'assistant', content: [
+      { type: 'thinking', thinking: '先想想' },
+      { type: 'text', text: '<system_reminder>元文本</system_reminder>' },
+      { type: 'text', text: '好的，我来改' },
+      { type: 'tool_use', name: 'Edit', input: { file_path: 'src/login.ts' } },
+    ] }),
+    // 顶层 tool_calls（OpenAI 形态，arguments 是 JSON 字符串）
+    JSON.stringify({ role: 'assistant', tool_calls: [{ id: 'c1', function: { name: 'Bash', arguments: '{"command":"pnpm test"}' } }] }),
+    // tool_result 块：is_error → toolFailed
+    JSON.stringify({ role: 'user', content: [{ type: 'tool_result', content: 'Error: boom', is_error: true }] }),
+    // role=tool 裸记录：整条 content 就是输出
+    JSON.stringify({ role: 'tool', content: [{ type: 'text', text: 'ok done' }] }),
+    // 嵌套容器：messages 数组递归展开
+    JSON.stringify({ messages: [
+      { role: 'user', content: [{ type: 'text', text: '嵌套的用户消息' }] },
+      { role: 'assistant', content: [{ type: 'text', text: '嵌套的助手回复' }] },
+    ] }),
+    '{broken-line',
+  ].join('\n')
+  const turns = parseCursorTranscriptText(text)
+  assert.deepEqual(turns.map((t) => t.role), [
+    'user', 'assistant', 'assistant', 'assistant', 'tool', 'tool', 'user', 'assistant',
+  ])
+  assert.equal(turns[0]!.text, '修一下登录页') // <user_query> 抽取 + 环境包装剔除
+  assert.equal(turns[1]!.text, '好的，我来改')
+  assert.equal(turns[2]!.toolName, 'Edit')
+  assert.equal(turns[3]!.toolName, 'Bash')
+  assert.equal(turns[3]!.text, 'pnpm test')
+  assert.equal(turns[4]!.toolFailed, true)
+  assert.equal(turns[5]!.text, 'ok done')
+  assert.equal(turns[6]!.text, '嵌套的用户消息')
+})
+
+test('cursor_render_value_rejects_non_object_and_unknown_role', () => {
+  assert.deepEqual(renderCursorValue('not-an-object'), [])
+  assert.deepEqual(renderCursorValue({ role: 'developer', content: 'x' }), [])
+  assert.deepEqual(renderCursorValue({ role: 'assistant' }), []) // 无内容
+  assert.deepEqual(decodeCursorBlob(Buffer.from([0xff, 0xfe, 0xfd])), null) // 二进制标不可用
+  assert.deepEqual(decodeCursorBlob(''), null)
+})
+
+// ── cursor：CLI store.db（node:sqlite 临时库；JSON / hex / 二进制三种 blob）──
+
+test('cursor_parse_store_db', () => {
+  withTempDir((dir) => {
+    const dbPath = join(dir, 'store.db')
+    const db = new DatabaseSync(dbPath)
+    db.exec('CREATE TABLE blobs (id TEXT PRIMARY KEY, data BLOB)')
+    const insert = db.prepare('INSERT INTO blobs VALUES (?, ?)')
+    insert.run('b1', JSON.stringify({ role: 'user', content: [{ type: 'text', text: 'store 里的用户消息' }] }))
+    // 十六进制编码的 JSON（cursor 偶发形态）
+    insert.run('b2', Buffer.from(JSON.stringify({ role: 'assistant', content: [{ type: 'text', text: 'hex 编码的助手回复' }] }), 'utf8').toString('hex'))
+    // 二进制 / protobuf：标不可用（跳过），不臆造
+    insert.run('b3', Buffer.from([0x00, 0xff, 0xfe, 0xfd, 0x01]))
+    db.close()
+
+    const turns = parseCursorStore(dbPath)
+    assert.equal(turns.length, 2)
+    assert.deepEqual(turns.map((t) => t.role), ['user', 'assistant'])
+    assert.equal(turns[0]!.text, 'store 里的用户消息')
+    assert.equal(turns[1]!.text, 'hex 编码的助手回复')
+
+    // 缺库静默为空（标不可用，不 throw）
+    assert.deepEqual(parseCursorStore(join(dir, 'nonexistent.db')), [])
+  })
+})
+
+test('cursor_adapter_parse_routes_by_id_shape', () => {
+  withTempDir((dir) => {
+    const file = join(dir, 'sid-1.jsonl')
+    writeFileSync(file, JSON.stringify({ role: 'user', content: '走 transcript 分支' }) + '\n', 'utf8')
+    const turns = cursorAdapter.parse(file)
+    assert.equal(turns.length, 1)
+    assert.equal(turns[0]!.role, 'user')
+    // 只有 meta.json 没有 store.db：无正文可恢复
+    const meta = join(dir, 'meta.json')
+    writeFileSync(meta, JSON.stringify({ title: 'x' }), 'utf8')
+    assert.deepEqual(cursorAdapter.parse(meta), [])
+    assert.deepEqual(cursorAdapter.parse(join(dir, 'missing.jsonl')), [])
+  })
+})
+
+// ── grok：updates.jsonl 可见更新流（chat_history 永不读）─────────────
+
+test('grok_parse_updates_text', () => {
+  const text = [
+    // JSON-RPC 包裹形态：params.update
+    JSON.stringify({ params: { update: { sessionUpdate: 'user_message_chunk', content: [{ type: 'text', text: '帮我看下' }] } } }),
+    // 流式分片：连续同角色 chunk 合并成一轮
+    JSON.stringify({ params: { update: { sessionUpdate: 'user_message_chunk', content: [{ type: 'text', text: '这个报错' }] } } }),
+    // 导出流形态：record 本身就是 update；非文本块标不可用
+    JSON.stringify({ sessionUpdate: 'agent_message_chunk', content: [{ type: 'text', text: '我看看' }, { type: 'image', url: 'x' }] }),
+    // 隐藏推理 / hook 记录：丢弃
+    JSON.stringify({ sessionUpdate: 'agent_thought_chunk', content: [{ type: 'text', text: '隐藏推理不外泄' }] }),
+    JSON.stringify({ sessionUpdate: 'hook_execution', hook: 'pre' }),
+    // 工具调用：pending → assistant 工具轮（name 取 _meta["x.ai/tool"].name）
+    JSON.stringify({ sessionUpdate: 'tool_call', toolCallId: 't1', status: 'pending', _meta: { 'x.ai/tool': { name: 'read_file' } }, rawInput: { path: 'src/a.ts' } }),
+    // 完成态去重 + diff 只留路径
+    JSON.stringify({ sessionUpdate: 'tool_call_update', toolCallId: 't1', status: 'completed', content: [{ type: 'diff', path: 'src/a.ts' }] }),
+    JSON.stringify({ sessionUpdate: 'tool_call_update', toolCallId: 't1', status: 'completed', content: [{ type: 'text', text: '重复结果' }] }),
+    // 失败态：toolFailed；rawOutput 兜底
+    JSON.stringify({ sessionUpdate: 'tool_call_update', toolCallId: 't2', status: 'failed', title: 'run_tests', rawOutput: '2 failed' }),
+    // plan / turn_completed / 未知类型：跳过
+    JSON.stringify({ sessionUpdate: 'plan', entries: [{ content: '第一步' }] }),
+    JSON.stringify({ sessionUpdate: 'turn_completed' }),
+    JSON.stringify({ sessionUpdate: 'some_future_update' }),
+    '{broken',
+  ].join('\n')
+  const turns = parseGrokUpdatesText(text, 'D:\\proj', 'grok-4')
+  assert.deepEqual(turns.map((t) => t.role), ['user', 'assistant', 'assistant', 'tool', 'tool'])
+  assert.equal(turns[0]!.text, '帮我看下\n这个报错') // 流式分片合并
+  assert.equal(turns[0]!.cwd, 'D:\\proj')
+  assert.equal(turns[1]!.text, '我看看\n[image 内容不可用]')
+  assert.equal(turns[2]!.toolName, 'read_file')
+  assert.equal(turns[2]!.text, 'read_file: src/a.ts')
+  assert.equal(turns[3]!.toolName, 'read_file')
+  assert.equal(turns[3]!.text, '[diff 内容不可用：src/a.ts]')
+  assert.equal(turns[3]!.toolFailed, false)
+  assert.equal(turns[4]!.toolName, 'run_tests')
+  assert.equal(turns[4]!.text, '2 failed')
+  assert.equal(turns[4]!.toolFailed, true)
+  assert.ok(!turns.some((t) => t.text.includes('隐藏推理')), 'agent_thought_chunk 不进 Turn')
+})
+
+test('grok_never_reads_chat_history', () => {
+  withTempDir((dir) => {
+    const sesDir = join(dir, 'sessions', 'D%3A%5Cproj', 'ses-001')
+    mkdirSync(sesDir, { recursive: true })
+    writeFileSync(join(sesDir, 'summary.json'), JSON.stringify({
+      info: { id: 'ses-001', cwd: 'D:\\proj' },
+      generated_title: '修报错',
+      current_model_id: 'grok-4',
+      last_active_at: '2026-08-22T10:00:00Z',
+    }), 'utf8')
+    writeFileSync(join(sesDir, 'updates.jsonl'), [
+      JSON.stringify({ sessionUpdate: 'user_message_chunk', content: [{ type: 'text', text: '可见流里的消息' }] }),
+      JSON.stringify({ sessionUpdate: 'agent_message_chunk', content: [{ type: 'text', text: '可见流里的回复' }] }),
+    ].join('\n') + '\n', 'utf8')
+    // 原始模型上下文：放毒标记，恢复边界要求永不读取
+    writeFileSync(join(sesDir, 'chat_history.jsonl'), JSON.stringify({ role: 'system', content: 'POISON_NEVER_READ' }) + '\n', 'utf8')
+
+    const turns = grokAdapter.parse(sesDir)
+    assert.equal(turns.length, 2)
+    assert.equal(turns[0]!.cwd, 'D:\\proj') // cwd 来自 summary.json
+    assert.equal(turns[0]!.model, 'grok-4')
+    assert.ok(!turns.some((t) => t.text.includes('POISON_NEVER_READ')), 'chat_history.jsonl 永不进 Turn')
+
+    // 也接受指向 summary.json / updates.jsonl 的路径
+    assert.equal(grokAdapter.parse(join(sesDir, 'updates.jsonl')).length, 2)
+    // updates.jsonl 缺失：空流不 throw
+    const emptyDir = join(dir, 'sessions', 'D%3A%5Cproj', 'ses-002')
+    mkdirSync(emptyDir, { recursive: true })
+    assert.deepEqual(grokAdapter.parse(emptyDir), [])
+  })
+})
+
+test('grok_parse_session_direct_function', () => {
+  withTempDir((dir) => {
+    writeFileSync(join(dir, 'summary.json'), JSON.stringify({ info: { cwd: 'D:\\x' } }), 'utf8')
+    writeFileSync(join(dir, 'updates.jsonl'), JSON.stringify({ sessionUpdate: 'user_message_chunk', content: '字符串 content' }) + '\n', 'utf8')
+    const turns = parseGrokSession(dir)
+    assert.equal(turns.length, 1)
+    assert.equal(turns[0]!.text, '字符串 content')
+    assert.equal(turns[0]!.cwd, 'D:\\x')
+  })
 })

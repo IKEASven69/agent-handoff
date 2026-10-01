@@ -7,7 +7,7 @@ import type { Turn } from './transcript.js'
 
 /** 一个已发现的会话（发现层产物，轻量：不含内容）。 */
 export interface SessionRef {
-  /** 归属适配器名：claude-code | codex | opencode | zcode | pi | workbuddy */
+  /** 归属适配器名：claude-code | codex | opencode | zcode | pi | workbuddy | cursor | grok */
   agent: string
   /** 稳定 id：文件系=绝对路径；SQLite 系=会话 id。 */
   id: string

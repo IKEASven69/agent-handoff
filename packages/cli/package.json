@@ -1,6 +1,6 @@
 {
   "name": "@agent-handoff/cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "handoff: 1 协议命令行：push / inbox / load / export-hippo",
   "type": "module",
   "bin": {
