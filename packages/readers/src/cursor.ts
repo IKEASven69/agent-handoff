@@ -1,5 +1,5 @@
 /**
- * Cursor 适配器（自研 TS 实现；格式调研参考 dsh-resume resources/session_reader.py，
+ * Cursor 适配器（自研 TS 实现；格式为公开逆向调研，
  * Apache-2.0，其 NOTICE 声明该 reader 逐字节来自 xAI Grok 1.0.5 捆绑 skill——
  * 此处只学存储格式，不复制其代码）。
  *

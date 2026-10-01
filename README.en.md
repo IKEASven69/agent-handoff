@@ -39,15 +39,14 @@ packages/cli/          # @agent-handoff/cli: push / inbox / load / export-hippo 
 skills/handoff/        # 10-line SKILL.md: teach an agent to write cards and check the inbox
 ```
 
-## Acknowledgements
+## Recovery boundaries
 
-The storage-format research for the cursor and grok readers referenced
-[dsh-resume](https://github.com/aa2246740/dsh-resume) (Apache-2.0; its NOTICE states the
-bundled session reader derives byte-for-byte from a skill bundled with xAI Grok 1.0.5).
-The adapters here are original TypeScript implementations — format knowledge only, no code
-copied. The recovery boundaries carry over as well: grok reads only the visible
-`updates.jsonl` stream and never touches the raw `chat_history.jsonl` model context;
-cursor imports only supported transcript / store records and never replays stored calls.
+All adapters here are original TypeScript implementations and treat foreign sessions as
+strictly read-only: they never revive processes and never replay stored calls.
+grok reads only the visible `updates.jsonl` stream and never touches the raw
+`chat_history.jsonl` model context; cursor imports only supported transcript / store
+records. System prompts, hidden reasoning, and encrypted or corrupted records are
+dropped or explicitly marked unavailable.
 
 ## Development
 

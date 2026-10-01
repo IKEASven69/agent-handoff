@@ -1,7 +1,7 @@
 /**
  * @agent-handoff/readers：八家 agent 会话的只读读取层。
  * 移植自 dsh-hippo src/agents/，零三方运行时依赖（zcode / cursor store 用 Node 内建 node:sqlite）。
- * cursor / grok 两家为自研实现，格式调研参考 dsh-resume（Apache-2.0）。
+ * cursor / grok 两家为自研实现（格式为公开逆向调研）。
  *
  * 公共 API：
  *   listSessions(agent?) → SessionRef[]   发现 + 按更新时间倒序
