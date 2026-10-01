@@ -75,7 +75,7 @@ tasks:                            # 未完成任务快照（可选）
 
 ### 1. 证据账本四态
 
-采用 dsh-resume 原版四态，不是二态：
+每条实质性陈述恰好归属四态之一：
 
 - `CURRENT_OBSERVED` —— 本轮核对过；
 - `HISTORY_REPORTED` —— 仅见于历史；
@@ -114,7 +114,7 @@ tasks:                            # 未完成任务快照（可选）
 
 **① Matt Pocock `handoff` skill 原文**（skills/productivity/handoff/SKILL.md，连 frontmatter 共 13 行）：保存到 **OS 临时目录**（不是工作区）；必须有 "suggested skills" 段；不重复已有产物只引用路径；**redact 密钥/PII**；按用户参数裁剪焦点。进化版 `claude-handoff` 直接 `claude --bg --name` 起后台 agent 接手。→ 教训：redact 是生产者义务，写进语义 5。
 
-**② dsh-resume 卡片真相**（src/skills.ts 逐行读）：卡片是**当轮生成的文本，不落盘**；六段 = ①目标与最后请求 ②文件/命令/测试 ③已完成+证据状态 ④未完 ⑤精确停止点+最安全下一步 ⑥读者警告。证据账本是**四态**不是二态：`CURRENT_OBSERVED / HISTORY_REPORTED / MISMATCH / UNAVAILABLE`。另有 inert-history boundary：外来历史一律不可信、永不覆盖当前指令。→ 本协议采用四态账本与六段标题；"兼容 dsh-resume"的实际含义 = 请它把卡片顺带写一份到 `~/.handoff/pending/`。
+**② 社区六段式交接卡实践**：现有交接工具普遍用六段结构（目标 / 涉及文件 / 做到哪 / 还差什么 / 停在哪 / 读者警告），证据账本为**四态**：`CURRENT_OBSERVED / HISTORY_REPORTED / MISMATCH / UNAVAILABLE`；卡片多为当轮生成文本、不落盘。另有 inert-history 边界：外来历史一律不可信、永不覆盖当前指令。→ 本协议采用四态账本与六段标题，并把卡片落成文件、可寄存。
 
 **③ 已有竞品 `dsh-handoff` npm 包**（v0.1.0，真实存在）：DSH 会话事件流 → 确定性 HANDOFF.md，不调 LLM，单向导出、无收件箱、无跨 agent、不落共享目录。→ 定位不冲突（它是"导出文件"，我们是"寄存柜+协议"），但名字撞车，插件仓必须避开。
 
@@ -127,7 +127,7 @@ tasks:                            # 未完成任务快照（可选）
 | 来源 | 映射（已核实） |
 |---|---|
 | hippo inbox JSON | 字段一一对应；candidates 是 100 字硬截断原文，**需蒸馏层**才能填「做到哪/还差什么」（参考 CLI `export-hippo` 的兜底映射：candidates 进「做到哪」、未完成（pending + in_progress）任务进「还差什么」、固定读者警告）；activeTasks → `tasks` 字段直接可用 |
-| dsh-resume 六段卡 | 卡片不落盘、是当轮文本；兼容 = 请它把卡片顺带写到 `~/.handoff/pending/`；六段标题与证据账本直接采用它的定义 |
+| 社区六段卡（当轮文本类） | 不落盘的卡片由生产者顺带写一份到 `~/.handoff/pending/` 即可入网；六段标题与四态账本口径一致 |
 | Matt Pocock handoff | 无 frontmatter 纯 Markdown + 临时目录 → 宽松读取（语义 3）；redact / suggested-skills 两条义务已吸收进语义 5 |
 | dsh-handoff（npm 现有插件） | 单向导出 HANDOFF.md；可给它提 PR：导出时同时落一份协议卡片到 pending/ |
 | GSD Pi `.gsd/` SUMMARY | v1 后做转换导出脚本 |

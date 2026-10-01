@@ -35,13 +35,12 @@ packages/cli/          # @agent-handoff/cli：push / inbox / load / export-hippo
 skills/handoff/        # 10 行 SKILL.md：教 agent 按格式写卡、开局查收件箱
 ```
 
-## 致谢
+## 恢复边界纪律
 
-cursor / grok 两家读取器的存储格式调研参考了 [dsh-resume](https://github.com/aa2246740/dsh-resume)
-（Apache-2.0；其 NOTICE 声明所含 session reader 逐字节来自 xAI Grok 1.0.5 的捆绑 skill）。
-本仓库的适配器为自研 TypeScript 实现，只学格式、不复制代码。恢复边界纪律同样沿用：
+本仓库的适配器均为自研 TypeScript 实现，对外来会话一律只读、不复活进程、不回放调用：
 grok 只读可见的 `updates.jsonl` 流、永不读 `chat_history.jsonl` 原始模型上下文；
-cursor 只导入支持的 transcript / store 记录、永不回放存储的调用。
+cursor 只导入支持的 transcript / store 记录、永不回放存储的调用；
+系统提示、隐藏推理、加密或损坏记录一律丢弃或标明不可用。
 
 ## 开发
 
