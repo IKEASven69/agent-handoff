@@ -1,5 +1,5 @@
 /**
- * sessions / pull 命令：从六家 agent 的本地会话直接生成协议卡片。
+ * sessions / pull 命令：从八家 agent 的本地会话直接生成协议卡片。
  * 卡片是确定性骨架（不调 LLM），内容均为 HISTORY_REPORTED；
  * from.session 存适配器 id（指针不是原文），git 快照走 core.collectGitSnapshot。
  */
@@ -55,7 +55,7 @@ export function cmdSessions(args: string[]): void {
     )
   }
   if (sessions.length === 0) {
-    console.log(agent !== undefined ? `${agent} 无已发现会话` : '无已发现会话（六家适配器均为空）')
+    console.log(agent !== undefined ? `${agent} 无已发现会话` : '无已发现会话（八家适配器均为空）')
     return
   }
   const shown = sessions.slice(0, Math.max(1, limit))

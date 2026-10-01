@@ -41,7 +41,7 @@ const USAGE = `用法：
   handoff export-hippo [--file <路径>]
       把 hippo 收件箱 JSON（默认 ~/.hippo/handoff-inbox.json）转成协议卡片（幂等）
   handoff sessions [agent] [--filter <词>] [--limit <N>]
-      列出发现的会话（agent/标题/更新时间/轮数）；agent 支持 claude-code / codex / opencode / zcode / pi / workbuddy
+      列出发现的会话（agent/标题/更新时间/轮数）；agent 支持 claude-code / codex / opencode / zcode / pi / workbuddy / cursor / grok
   handoff pull <agent> [reference]
       读会话（id / id 前缀 / 路径 / 标题关键词，缺省 latest）→ 确定性骨架卡片写入 ~/.handoff/pending/；
       匹配歧义时列候选，不猜`

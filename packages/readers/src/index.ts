@@ -1,6 +1,7 @@
 /**
- * @agent-handoff/readers：六家 agent 会话的只读读取层。
- * 移植自 dsh-hippo src/agents/，零三方运行时依赖（zcode 用 Node 内建 node:sqlite）。
+ * @agent-handoff/readers：八家 agent 会话的只读读取层。
+ * 移植自 dsh-hippo src/agents/，零三方运行时依赖（zcode / cursor store 用 Node 内建 node:sqlite）。
+ * cursor / grok 两家为自研实现，格式调研参考 dsh-resume（Apache-2.0）。
  *
  * 公共 API：
  *   listSessions(agent?) → SessionRef[]   发现 + 按更新时间倒序
@@ -16,6 +17,8 @@ import { opencodeAdapter } from './opencode.js'
 import { zcodeAdapter } from './zcode.js'
 import { piAdapter } from './pi.js'
 import { workbuddyAdapter } from './workbuddy.js'
+import { cursorAdapter } from './cursor.js'
+import { grokAdapter } from './grok.js'
 
 export const AGENTS: SessionAdapter[] = [
   claudeAdapter,
@@ -24,6 +27,8 @@ export const AGENTS: SessionAdapter[] = [
   zcodeAdapter,
   piAdapter,
   workbuddyAdapter,
+  cursorAdapter,
+  grokAdapter,
 ]
 
 const byName = new Map(AGENTS.map((a) => [a.name, a]))
@@ -92,3 +97,5 @@ export { parseCodexText } from './codex.js'
 export { parseOpenCodeSession } from './opencode.js'
 export { parseZcodeSession } from './zcode.js'
 export { parsePiText } from './pi.js'
+export { parseCursorTranscriptText, parseCursorStore, renderCursorValue, decodeCursorBlob } from './cursor.js'
+export { parseGrokSession, parseGrokUpdatesText } from './grok.js'

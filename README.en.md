@@ -32,9 +32,22 @@ handoff export-hippo          # convert a hippo inbox JSON into protocol cards (
 ```
 SPEC.md                # the protocol (format + directories + five semantics + versioning)
 packages/core/         # @agent-handoff/core: zero-dep TS library — read/write, dirs, git verify
-packages/cli/          # @agent-handoff/cli: push / inbox / load / export-hippo
+packages/readers/      # @agent-handoff/readers: read-only session discovery/parsing for eight
+                       #   agents (claude-code / codex / opencode / zcode / pi / workbuddy /
+                       #   cursor / grok)
+packages/cli/          # @agent-handoff/cli: push / inbox / load / export-hippo / sessions / pull
 skills/handoff/        # 10-line SKILL.md: teach an agent to write cards and check the inbox
 ```
+
+## Acknowledgements
+
+The storage-format research for the cursor and grok readers referenced
+[dsh-resume](https://github.com/aa2246740/dsh-resume) (Apache-2.0; its NOTICE states the
+bundled session reader derives byte-for-byte from a skill bundled with xAI Grok 1.0.5).
+The adapters here are original TypeScript implementations — format knowledge only, no code
+copied. The recovery boundaries carry over as well: grok reads only the visible
+`updates.jsonl` stream and never touches the raw `chat_history.jsonl` model context;
+cursor imports only supported transcript / store records and never replays stored calls.
 
 ## Development
 
