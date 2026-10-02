@@ -31,7 +31,7 @@ import { basename, join } from 'node:path'
 import { homedir } from 'node:os'
 import { createRequire } from 'node:module'
 import { makeTurn, summarizeToolCall, type Turn } from './transcript.js'
-import type { SessionAdapter, SessionRef } from './types.js'
+import { FAKE_ZERO_NOTE, type SessionAdapter, type SessionRef } from './types.js'
 
 const ROOT = process.env['HANDOFF_ROOT_CURSOR'] ?? join(homedir(), '.cursor')
 
@@ -340,11 +340,16 @@ function readMetaJson(path: string): CursorMeta {
   return meta
 }
 
+/** node:sqlite 缺席时的静态说明（有数据但仍缺 sqlite 时显示）；假 0 哨兵触发时被覆盖，有数据后恢复 */
+const BASE_NOTE = DatabaseSync === null
+  ? 'CLI store.db 形态需要 Node ≥22（node:sqlite）；transcript 形态不受影响'
+  : undefined
+
 export const cursorAdapter: SessionAdapter = {
   name: 'cursor',
   root: ROOT,
   supported: true,
-  note: DatabaseSync === null ? 'CLI store.db 形态需要 Node ≥22（node:sqlite）；transcript 形态不受影响' : undefined,
+  note: BASE_NOTE,
 
   discover(): SessionRef[] {
     const out: SessionRef[] = []
@@ -439,6 +444,8 @@ export const cursorAdapter: SessionAdapter = {
         })
       }
     }
+    // 假 0 哨兵：根目录在但两种形态都没发现会话——布局可能已迁移；有数据恢复静态说明
+    this.note = out.length === 0 && existsSync(ROOT) ? FAKE_ZERO_NOTE : BASE_NOTE
     return out.sort((a, b) => b.updatedAt - a.updatedAt)
   },
 

@@ -31,6 +31,28 @@ import { claudeAdapter } from '../src/claude.js'
 import { workbuddyAdapter } from '../src/workbuddy.js'
 import { cursorAdapter } from '../src/cursor.js'
 import { grokAdapter } from '../src/grok.js'
+import { opencodeAdapter as opencodeAdapterReal } from '../src/opencode.js'
+import { FAKE_ZERO_NOTE } from '../src/types.js'
+
+/** 适配器 note 是否已被置为假 0 哨兵（不比对整个字符串，出错时再展开） */
+function assertSentinel(note: string | undefined, label: string): void {
+  assert.equal(note, FAKE_ZERO_NOTE, `${label} 应置假 0 哨兵，got ${JSON.stringify(note)}`)
+}
+
+/**
+ * 假 0 哨兵测试基建：适配器 ROOT 是模块加载时读的环境变量常量，
+ * 用「设 env + query 串 bust 缓存」拿一份以临时目录为根的新鲜模块实例。
+ */
+async function freshAdapter<T>(module: 'codex' | 'cursor' | 'grok' | 'opencode', envKey: string, root: string, query: string): Promise<T> {
+  process.env[envKey] = root
+  try {
+    const m = await import(`../src/${module}.ts?sentinel-${module}-${query}`)
+    const key = `${module}Adapter` as keyof typeof m
+    return m[key] as T
+  } finally {
+    delete process.env[envKey]
+  }
+}
 
 function withTempDir<T>(fn: (dir: string) => T): T {
   const dir = mkdtempSync(join(tmpdir(), 'handoff-readers-'))
@@ -439,4 +461,92 @@ test('opencode_db_sessions_sqlite_layout', async () => {
   assert.equal(turns[0]!.role, 'user')
   assert.equal(turns[0]!.text, '你好 db')
   assert.equal(turns[0]!.cwd, 'D:/w')
+})
+
+// ── 假 0 哨兵：存储根目录存在但 discover 为 0 → note 提示布局可能迁移 ──
+
+test('sentinel: codex 根存在但 0 会话 → 哨兵；有数据 → note 保持空', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sentinel-codex-'))
+  try {
+    const root = join(dir, 'sessions')
+    mkdirSync(root, { recursive: true })
+    const adapter = await freshAdapter<typeof codexAdapter>('codex', 'HANDOFF_ROOT_CODEX', root, 'empty')
+    assert.deepEqual(adapter.discover(), [])
+    assertSentinel(adapter.note, 'codex 空根')
+    // 有数据的家：note 保持空
+    writeFileSync(join(root, 'rollout-1.jsonl'), JSON.stringify({ type: 'session_meta', payload: { cwd: 'D:\\x' } }) + '\n', 'utf8')
+    assert.equal(adapter.discover().length, 1)
+    assert.equal(adapter.note, undefined)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('sentinel: codex 根不存在 → 不触发（没装 = 正常静默）', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sentinel-codex-missing-'))
+  try {
+    const adapter = await freshAdapter<typeof codexAdapter>('codex', 'HANDOFF_ROOT_CODEX', join(dir, 'absent'), 'missing')
+    assert.deepEqual(adapter.discover(), [])
+    assert.equal(adapter.note, undefined)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('sentinel: cursor 根存在但 0 会话 → 哨兵；有 transcript → 恢复静态说明', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sentinel-cursor-'))
+  try {
+    const adapter = await freshAdapter<typeof cursorAdapter>('cursor', 'HANDOFF_ROOT_CURSOR', dir, 'empty')
+    assert.deepEqual(adapter.discover(), [])
+    assertSentinel(adapter.note, 'cursor 空根')
+    // 有数据（transcript 形态）：哨兵撤下，note 回到静态说明（node:sqlite 可用时为空）
+    const atDir = join(dir, 'projects', 'D%3A%5Cproj', 'agent-transcripts', 'sid-1')
+    mkdirSync(atDir, { recursive: true })
+    writeFileSync(join(atDir, 'sid-1.jsonl'), JSON.stringify({ role: 'user', content: 'transcript 在' }) + '\n', 'utf8')
+    assert.equal(adapter.discover().length, 1)
+    assert.notEqual(adapter.note, FAKE_ZERO_NOTE)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('sentinel: grok 根存在但 0 会话 → 哨兵；有数据 → note 保持空', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sentinel-grok-'))
+  try {
+    const root = join(dir, 'sessions')
+    mkdirSync(root, { recursive: true })
+    const adapter = await freshAdapter<typeof grokAdapter>('grok', 'HANDOFF_ROOT_GROK', root, 'empty')
+    assert.deepEqual(adapter.discover(), [])
+    assertSentinel(adapter.note, 'grok 空根')
+    const sesDir = join(root, 'D%3A%5Cproj', 'ses-001')
+    mkdirSync(sesDir, { recursive: true })
+    writeFileSync(join(sesDir, 'summary.json'), JSON.stringify({ info: { id: 'ses-001', cwd: 'D:\\proj' } }), 'utf8')
+    writeFileSync(join(sesDir, 'updates.jsonl'), JSON.stringify({ sessionUpdate: 'user_message_chunk', content: 'hi' }) + '\n', 'utf8')
+    assert.equal(adapter.discover().length, 1)
+    assert.equal(adapter.note, undefined)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('sentinel: opencode storage/ 在但 0 会话 → 哨兵（只针对 storage 回退路径）', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sentinel-oc-'))
+  try {
+    // storage/ 存在但 session/ 层缺席
+    const adapterA = await freshAdapter<typeof opencodeAdapterReal>('opencode', 'HANDOFF_ROOT_OPENCODE', dir, 'storage-no-session')
+    mkdirSync(join(dir, 'storage'), { recursive: true })
+    assert.deepEqual(adapterA.discover(), [])
+    assertSentinel(adapterA.note, 'opencode storage 无 session 层')
+    // storage/session 在但空的会话文件层
+    const adapterB = await freshAdapter<typeof opencodeAdapterReal>('opencode', 'HANDOFF_ROOT_OPENCODE', dir, 'storage-empty-session')
+    mkdirSync(join(dir, 'storage', 'session', 'proj1'), { recursive: true })
+    assert.deepEqual(adapterB.discover(), [])
+    assertSentinel(adapterB.note, 'opencode session 层为空')
+    // 有数据：哨兵撤下
+    writeFileSync(join(dir, 'storage', 'session', 'proj1', 'ses_1.json'), JSON.stringify({ id: 'ses_1', title: 't' }), 'utf8')
+    assert.equal(adapterB.discover().length, 1)
+    assert.notEqual(adapterB.note, FAKE_ZERO_NOTE)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

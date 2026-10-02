@@ -33,7 +33,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 import { makeTurn, summarizeToolCall, type Turn } from './transcript.js'
-import type { SessionAdapter, SessionRef } from './types.js'
+import { FAKE_ZERO_NOTE, type SessionAdapter, type SessionRef } from './types.js'
 
 const GROK_HOME = process.env['GROK_HOME'] ?? join(homedir(), '.grok')
 const ROOT = process.env['HANDOFF_ROOT_GROK'] ?? join(GROK_HOME, 'sessions')
@@ -287,6 +287,8 @@ export const grokAdapter: SessionAdapter = {
         })
       }
     }
+    // 假 0 哨兵：根目录在但一个会话都没有——布局可能已迁移（root 缺席在上方已静默返回，不触发）
+    this.note = out.length === 0 ? FAKE_ZERO_NOTE : undefined
     return out.sort((a, b) => b.updatedAt - a.updatedAt)
   },
 

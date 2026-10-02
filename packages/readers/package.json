@@ -1,6 +1,6 @@
 {
   "name": "@agent-handoff/readers",
-  "version": "0.2.0",
+  "version": "0.1.1",
   "description": "handoff 会话读取器：八家 agent（claude-code / codex / opencode / zcode / pi / workbuddy / cursor / grok）的只读会话发现与解析，零三方运行时依赖",
   "type": "module",
   "main": "./dist/index.mjs",

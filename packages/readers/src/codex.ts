@@ -3,11 +3,11 @@
  * session_meta 给 cwd；response_item 是权威消息流（event_msg 为 UI 事件，跳过避免重复）。
  * 移植自 dsh-hippo src/agents/codex.ts；root 可用 HANDOFF_ROOT_CODEX 覆盖（测试用）。
  */
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { homedir } from 'node:os'
 import { makeTurn, type Turn } from './transcript.js'
-import type { SessionAdapter, SessionRef } from './types.js'
+import { FAKE_ZERO_NOTE, type SessionAdapter, type SessionRef } from './types.js'
 
 const ROOT = process.env['HANDOFF_ROOT_CODEX'] ?? join(homedir(), '.codex', 'sessions')
 
@@ -91,6 +91,8 @@ export const codexAdapter: SessionAdapter = {
         kind: 'file',
       })
     }
+    // 假 0 哨兵：根目录在但一个会话都没有——布局可能已迁移（有数据的家 note 保持空）
+    this.note = out.length === 0 && existsSync(ROOT) ? FAKE_ZERO_NOTE : undefined
     return out.sort((a, b) => b.updatedAt - a.updatedAt)
   },
   parse(id: string) {

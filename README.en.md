@@ -4,6 +4,27 @@ An **open file format** for agent session handoff cards, plus a zero-dependency 
 implementation. The filesystem is the bus: cards live in a plain `~/.handoff/` directory —
 no API, no daemon.
 
+> **Protocol notice · handoff: 1**
+> `handoff: 1` is a **versioned open protocol** — the `handoff: 1` first line of a card's
+> frontmatter is the protocol version. This repo holds the SPEC ([SPEC.md](./SPEC.md)) and
+> the zero-dependency reference implementation. The format and semantics are free for
+> anyone to use and implement; evolution rules live in the SPEC versioning section
+> (additive fields only; breaking changes bump the `handoff:` value).
+> **Adopter registry**: if your project adopts this protocol, please register via an
+> [issue](https://github.com/IKEASven69/agent-handoff/issues) (project name + link is
+> enough; no approval process) and we will list it below.
+>
+> **Clarification**: [JarvanAI/agent-handoff](https://github.com/JarvanAI/agent-handoff)
+> on GitHub shares the name but is **not affiliated** with this repo — it is not an
+> implementation of this protocol and did not participate in this format's design.
+> Identifying marks of this protocol: `handoff: 1` frontmatter + six fixed sections +
+> the `~/.handoff/` directory semantics, with the reference implementation in this
+> repo's `packages/*`.
+
+## Adopters
+
+_(none registered yet. Projects adopting `handoff: 1`: please open an issue to register; listed in registration order.)_
+
 ## Layout
 
 ```
