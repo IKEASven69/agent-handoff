@@ -20,6 +20,15 @@ export interface SessionRef {
   kind: 'file' | 'sqlite'
 }
 
+/**
+ * 假 0 哨兵：存储根目录存在但 discover 为 0——上游可能已迁移存储布局。
+ * 出处：opencode 1.18 迁 SQLite 后旧读取器本机假报 0（casr #26 同日中招）。
+ * 适用于文件布局适配器（codex / cursor / grok）与 opencode 的 storage 回退路径；
+ * 根目录不存在（没装）不触发——那是正常静默。
+ */
+export const FAKE_ZERO_NOTE =
+  '存储目录存在但未发现会话——上游可能已迁移存储布局（参考 opencode 1.18 迁 SQLite）'
+
 /** 一个 agent 的会话发现结果（inventory）。 */
 export interface AgentInventory {
   agent: string

@@ -3,6 +3,22 @@
 agent 会话交接卡片（handoff card）的**开放文件格式** + 零依赖参考实现。
 文件系统即总线：卡片落在 `~/.handoff/` 纯文件目录，任何工具直接读写，无 API、无守护进程。
 
+> **协议声明 · handoff: 1**
+> `handoff: 1` 是**版本化开放协议**——卡片 frontmatter 首行的 `handoff: 1` 就是协议版本号，
+> 本仓是其 SPEC（[SPEC.md](./SPEC.md)）与零依赖参考实现。格式与语义任何人可用、可实现；
+> 演进纪律见 SPEC 版本节（字段只增不破，破坏性变更换 `handoff:` 版本值）。
+> **采用登记**：采用本协议的项目请到 [Issues](https://github.com/IKEASven69/agent-handoff/issues)
+> 登记一下（项目名 + 链接即可，不作审批），我们在下方采用列表里挂名。
+>
+> **澄清**：GitHub 上的 [JarvanAI/agent-handoff](https://github.com/JarvanAI/agent-handoff)
+> 与本仓同名但**无任何关联**——它不是本协议的实现，也未参与本仓的格式与语义设计。
+> 判别特征：本协议的卡片是 `handoff: 1` frontmatter + 六段正文 + `~/.handoff/` 目录语义，
+> 参考实现为本仓 `packages/*`。
+
+## 采用列表
+
+_（暂无登记。采用了 `handoff: 1` 的项目请开 issue 登记，按登记时间排序。）_
+
 ## 目录约定
 
 ```

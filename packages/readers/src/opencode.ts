@@ -14,7 +14,7 @@ import { basename, join } from 'node:path'
 import { homedir } from 'node:os'
 import { createRequire } from 'node:module'
 import { makeTurn, type Turn } from './transcript.js'
-import type { SessionAdapter, SessionRef } from './types.js'
+import { FAKE_ZERO_NOTE, type SessionAdapter, type SessionRef } from './types.js'
 
 const BASE = process.env['HANDOFF_ROOT_OPENCODE'] ?? join(homedir(), '.local', 'share', 'opencode')
 const DB_PATH = join(BASE, 'opencode.db')
@@ -37,6 +37,11 @@ function loadSqlite(): (new (path: string, opts?: { readOnly?: boolean }) => RoD
 }
 
 const DatabaseSync = loadSqlite()
+
+/** node:sqlite 缺席但新版 DB 在场的静态说明（走 DB 前先挂上）；假 0 哨兵触发时被覆盖 */
+const BASE_NOTE = DatabaseSync === null && existsSync(DB_PATH)
+  ? '需要 Node ≥22（node:sqlite）读取新版 opencode.db'
+  : undefined
 
 function openDb(dbPath: string = DB_PATH): RoDatabase | null {
   if (DatabaseSync === null || !existsSync(dbPath)) return null
@@ -159,7 +164,7 @@ export const opencodeAdapter: SessionAdapter = {
   name: 'opencode',
   root: BASE,
   supported: true,
-  note: DatabaseSync === null && existsSync(DB_PATH) ? '需要 Node ≥22（node:sqlite）读取新版 opencode.db' : undefined,
+  note: BASE_NOTE,
   discover(): SessionRef[] {
     const out: SessionRef[] = []
     const db = openDb()
@@ -182,12 +187,14 @@ export const opencodeAdapter: SessionAdapter = {
         db.close()
       }
     }
-    // 旧版三层文件布局回退
+    // 旧版三层文件布局回退（假 0 哨兵只针对本回退路径：DB 布局由表数据说话）
     const sessionRoot = join(LEGACY_ROOT, 'session')
     let projects: string[] = []
     try {
       projects = readdirSync(sessionRoot, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => join(sessionRoot, d.name))
     } catch {
+      // storage/ 在但 session/ 层缺席 = 布局可能已迁移；storage/ 缺席 = 没装旧版，正常静默
+      if (existsSync(LEGACY_ROOT)) this.note = FAKE_ZERO_NOTE
       return out
     }
     for (const projDir of projects) {
@@ -218,6 +225,9 @@ export const opencodeAdapter: SessionAdapter = {
         })
       }
     }
+    // 假 0 哨兵：storage/ 在但没扫到会话；有数据恢复静态说明
+    if (out.length === 0 && existsSync(LEGACY_ROOT)) this.note = FAKE_ZERO_NOTE
+    else if (out.length > 0) this.note = BASE_NOTE
     return out.sort((a, b) => b.updatedAt - a.updatedAt)
   },
   parse(id: string): Turn[] {
