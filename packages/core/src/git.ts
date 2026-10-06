@@ -9,9 +9,11 @@ export interface GitVerifyResult {
   unavailable?: string
 }
 
-/** 同步跑 git，失败抛错（由调用方降级为 UNAVAILABLE，不往外 throw） */
+/** 同步跑 git，失败抛错（由调用方降级为 UNAVAILABLE，不往外 throw）。
+ * `-c core.fsmonitor=false`：卡片 cwd 是外来输入，仓库本地 fsmonitor 钩子是卡片作者
+ * 可布置的命令执行面（读一张卡 = 执行一段卡片作者的 shell）——快照与核验一律禁用。 */
 function git(cwd: string, args: string[]): string {
-  return execFileSync('git', ['-C', cwd, ...args], {
+  return execFileSync('git', ['-C', cwd, '-c', 'core.fsmonitor=false', ...args], {
     encoding: 'utf-8',
     stdio: ['ignore', 'pipe', 'pipe'],
   }).trim()

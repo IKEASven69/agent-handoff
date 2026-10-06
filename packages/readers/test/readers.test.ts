@@ -187,7 +187,7 @@ test('zcode_parse_temp_sqlite_db', () => {
     assert.equal(turns.length, 4)
     assert.deepEqual(turns.map((t) => t.role), ['user', 'assistant', 'assistant', 'tool'])
     assert.equal(turns[0]!.cwd, 'D:\\proj')
-    assert.equal(turns[1]!.text, '我采用方案 X 因为 Y') // reasoning → assistant
+    assert.equal(turns[1]!.text, '[thinking] 我采用方案 X 因为 Y') // reasoning → assistant（带标记，蒸馏可剔除）
     assert.equal(turns[3]!.toolFailed, true)
     assert.equal(turns[3]!.toolName, 'edit')
 
