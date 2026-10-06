@@ -266,7 +266,7 @@ function emitScalar(v: string | number | boolean | null): string {
 }
 
 /** key 校验：含冒号/空白/引号的 key 会在回读时静默错位，直接拒写（协议键均为安全形态） */
-const SAFE_KEY = /^[A-Za-z0-9_.\-]+$/
+export const SAFE_KEY = /^[A-Za-z0-9_.\-]+$/
 function emitKey(k: string): string {
   if (!SAFE_KEY.test(k)) throw new Error(`YAML 键无法安全输出：${k}（键只允许字母、数字、_ . -）`)
   return k

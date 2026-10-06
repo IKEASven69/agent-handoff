@@ -8,6 +8,7 @@
  *   readSession(agent, ref) → Turn[]      解析一个会话为 Turn 流
  *   resolveReference(agent, reference)    引用解析（歧义返回候选列表，不猜）
  */
+import { statSync } from 'node:fs'
 import type { Turn } from './transcript.js'
 import type { AgentInventory, SessionAdapter, SessionRef } from './types.js'
 import { resolveReference, type ResolveResult } from './resolve.js'
@@ -61,16 +62,86 @@ export function listSessions(agent?: string): SessionRef[] {
   return out.sort((x, y) => y.updatedAt - x.updatedAt)
 }
 
-/** 解析一个会话为 Turn 流；ref 可以是 SessionRef 或适配器 id 字符串。 */
+/** 解析一个会话为 Turn 流；ref 可以是 SessionRef 或适配器 id 字符串。
+ * 同一文件（mtime+size 指纹不变）重复读取命中缓存——list 对 20 个候选逐个
+ * readSession 数用户轮、show 全量解析后才分页，无缓存时每次调用都重付
+ * O(总字节) 的同步 readFileSync+JSON.parse（30s 轮询场景成倍放大）。
+ * 缓存有界：条目上限与累计正文上限双闸，超出按 LRU 淘汰。 */
 export function readSession(agent: string, ref: SessionRef | string): Turn[] {
   const a = adapterFor(agent)
   if (!a.supported) return []
   const id = typeof ref === 'string' ? ref : ref.id
+  const fingerprint = fileFingerprint(id)
+  const cacheKey = `${a.name}\u0000${id}`
+  const hit = fingerprint === '' ? undefined : sessionCache.get(cacheKey)
+  if (hit !== undefined && hit.fingerprint === fingerprint) {
+    hit.used = ++cacheTick
+    return hit.turns
+  }
+  let turns: Turn[]
   try {
-    return a.parse(id)
+    turns = a.parse(id)
   } catch {
     return []
   }
+  if (fingerprint !== '' && turns.length > 0) {
+    const chars = turns.reduce((n, t) => n + t.text.length, 0)
+    if (chars <= CACHE_MAX_CHARS) {
+      sessionCache.set(cacheKey, { fingerprint, turns, chars, used: ++cacheTick })
+      while (sessionCache.size > CACHE_MAX_ENTRIES) evictOldest()
+      trimByChars()
+    }
+  }
+  return turns
+}
+
+interface CacheEntry {
+  fingerprint: string
+  turns: Turn[]
+  chars: number
+  used: number
+}
+
+const sessionCache = new Map<string, CacheEntry>()
+const CACHE_MAX_ENTRIES = 6
+const CACHE_MAX_CHARS = 24_000_000
+let cacheTick = 0
+
+function evictOldest(): void {
+  let oldestKey: string | undefined
+  let oldest = Number.POSITIVE_INFINITY
+  for (const [key, entry] of sessionCache) {
+    if (entry.used < oldest) {
+      oldest = entry.used
+      oldestKey = key
+    }
+  }
+  if (oldestKey !== undefined) sessionCache.delete(oldestKey)
+}
+
+function trimByChars(): void {
+  while (cacheTotalChars() > CACHE_MAX_CHARS && sessionCache.size > 1) evictOldest()
+}
+
+function cacheTotalChars(): number {
+  let n = 0
+  for (const entry of sessionCache.values()) n += entry.chars
+  return n
+}
+
+/** 文件指纹（mtime:size）；stat 失败回空串（不可缓存，直接现读） */
+function fileFingerprint(id: string): string {
+  try {
+    const st = statSync(id)
+    return st.isFile() ? `${Math.round(st.mtimeMs)}:${st.size}` : ''
+  } catch {
+    return ''
+  }
+}
+
+/** 测试钩子：清空解析缓存 */
+export function clearSessionCache(): void {
+  sessionCache.clear()
 }
 
 /** 引用解析：先发现该 agent 的会话，再按 id/路径/标题规则匹配。 */

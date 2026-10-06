@@ -2,7 +2,7 @@
 import { mock, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -297,11 +297,11 @@ test('回归🟡3：loadCard/writeCard 拒绝外来 id（路径穿越闸）', ()
   assert.notEqual(c2.id, 'ho-NotSafe')
 })
 
-test('回归🟡4：archived 滚动清理失败只告警，不影响 load 结果', () => {
+test('回归🟡4：archived 里的 *.md 目录不再卡死滚动（跳过异常项，取件不受影响、零告警）', () => {
   const home = tmpHome()
   const card = sampleCard()
   writeCard(card, home)
-  // 造一个名为 .md 的目录，mtime 最旧，trim 时 rmSync 必抛
+  // 造一个名为 .md 的目录：曾是 trim 抛 EISDIR、整轮清理作废的元凶，现应被跳过
   const ad = archivedDir(home)
   mkdirSync(ad, { recursive: true })
   for (let i = 0; i < 51; i++) writeFileSync(join(ad, `ho-f${i.toString(36)}-${i.toString(36).padStart(4, '0')}.md`), 'x')
@@ -312,12 +312,13 @@ test('回归🟡4：archived 滚动清理失败只告警，不影响 load 结果
   const warn = mock.method(console, 'warn', () => {})
   try {
     const got = loadCard(card.id, home)
-    assert.equal(got.id, card.id, 'trim 抛错不影响取件结果')
+    assert.equal(got.id, card.id, '清理不再受异常项拖累，取件照常')
   } finally {
     warn.mock.restore()
   }
-  assert.equal(warn.mock.callCount(), 1, '失败只告警一次')
-  assert.ok(String(warn.mock.calls[0]!.arguments[0]).includes('滚动清理失败'))
+  assert.equal(warn.mock.callCount(), 0, '异常项跳过后清理应成功，不告警')
+  const left = readdirSync(ad).filter((f) => statSync(join(ad, f)).isFile())
+  assert.equal(left.length, 50, '滚动上限维持 50 份（异常项不占窗口也不挡清理）')
 })
 
 test('回归🟡5：中文文件名快照不含八进制转义（core.quotePath=false）', () => {

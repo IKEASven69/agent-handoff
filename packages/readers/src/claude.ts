@@ -24,22 +24,26 @@ function* walkJsonl(dir: string): Generator<string> {
   }
 }
 
-/** 从转录头部几行取真实 cwd（用户条目带 cwd 字段）。
- * 目录名解码有歧义（连字符 vs 路径分隔符），首行才是权威来源。 */
-function realCwd(file: string, fallback: string): string {
+/** cwd 侦测窗口（首行一般 <8KB；超长首行的会话视为未记录而非伪造） */
+const CWD_WINDOW = 8192
+
+/** 从转录头部窗口取真实 cwd（用户条目带 cwd 字段）。
+ * 目录名解码有歧义（连字符 vs 路径分隔符），拿目录名编一个「像路径的伪 cwd」比空更误导——
+ * 窗口内找不到（首行超长 / 字段缺失 / 读失败）一律回空串，让上层给「未记录工作区目录」警告。 */
+function realCwd(file: string): string {
   try {
     const fd = openSync(file, 'r')
     try {
-      const buf = Buffer.alloc(8192)
-      const n = readSync(fd, buf, 0, 8192, 0)
+      const buf = Buffer.alloc(CWD_WINDOW)
+      const n = readSync(fd, buf, 0, CWD_WINDOW, 0)
       const head = buf.toString('utf8', 0, n)
       const m = /"cwd"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(head)
       if (m) return JSON.parse(`"${m[1]}"`)
     } finally {
       closeSync(fd)
     }
-  } catch { /* 读失败回退 */ }
-  return fallback
+  } catch { /* 读失败回空串 */ }
+  return ''
 }
 
 export const claudeAdapter: SessionAdapter = {
@@ -61,7 +65,7 @@ export const claudeAdapter: SessionAdapter = {
         agent: this.name,
         id: file,
         title: basename(file, '.jsonl'),
-        cwd: realCwd(file, basename(join(file, '..'))),
+        cwd: realCwd(file),
         updatedAt: mtime,
         fingerprint: `${Math.round(mtime)}:${size}`,
         kind: 'file',

@@ -1,6 +1,6 @@
 /** 卡片渲染与解析：严格模式（parseCard）与宽松模式（parseCardLenient，语义 3） */
 import type { Card, CardFrom, CardSections, GitSnapshot, TaskSnapshot, TaskStatus } from './types.js'
-import { yamlEmit, yamlParse, type YamlValue } from './yaml.js'
+import { SAFE_KEY, yamlEmit, yamlParse, type YamlValue } from './yaml.js'
 
 /** 六段固定顺序 + 可选「建议加载」 */
 export const SECTION_KEYS = ['goal', 'files', 'done', 'remaining', 'stopped', 'warnings'] as const
@@ -73,6 +73,24 @@ const asStr = (v: YamlValue | undefined, dflt = ''): string =>
 const asMap = (v: YamlValue | undefined): Record<string, YamlValue> =>
   typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, YamlValue>) : {}
 
+/**
+ * 键净化：外来 frontmatter 会出现「能解析不能渲染」的键（如含空格的 `my key`，
+ * yamlEmit 的 emitKey 对其抛错）——曾经把 loadCard 变成「先归档后渲染失败」，
+ * 调用方收到 ok:false 卡片却已被消费。进 Card 前统一净化为可安全输出的键
+ * （非法字符替换 _，值保留，后写者覆盖同名），使解析能力与渲染能力对齐。
+ */
+export function sanitizeKey(k: string): string {
+  if (SAFE_KEY.test(k)) return k
+  const out = k.replace(/[^A-Za-z0-9_.\-]/g, '_').slice(0, 128)
+  return out === '' ? '_' : out
+}
+
+function sanitizeKeys(obj: Record<string, YamlValue>): Record<string, YamlValue> {
+  const out: Record<string, YamlValue> = {}
+  for (const [k, v] of Object.entries(obj)) out[sanitizeKey(k)] = v
+  return out
+}
+
 /** frontmatter map → Card：缺字段给默认值，未知字段保留（版本纪律） */
 export function frontmatterToCard(
   obj: Record<string, YamlValue>,
@@ -90,7 +108,7 @@ export function frontmatterToCard(
       agent: asStr(fromMap.agent),
       session: asStr(fromMap.session),
       title: asStr(fromMap.title),
-      ...restOf(fromMap, ['agent', 'session', 'title']),
+      ...sanitizeKeys(restOf(fromMap, ['agent', 'session', 'title'])),
     } as CardFrom,
     to: asStr(to, 'any'),
     project: asStr(project),
@@ -99,7 +117,7 @@ export function frontmatterToCard(
     git: {
       branch: asStr(gitMap.branch),
       changed: Array.isArray(gitMap.changed) ? gitMap.changed.map(x => asStr(x)) : [],
-      ...restOf(gitMap, ['branch', 'changed']),
+      ...sanitizeKeys(restOf(gitMap, ['branch', 'changed'])),
     } as GitSnapshot,
     tasks: taskList.map(t => {
       const tm = asMap(t)
@@ -107,12 +125,12 @@ export function frontmatterToCard(
       const snap: TaskSnapshot = {
         text: asStr(tm.text),
         status: (VALID_STATUS as string[]).includes(status) ? (status as TaskStatus) : 'pending',
-        ...restOf(tm, ['text', 'status']),
+        ...sanitizeKeys(restOf(tm, ['text', 'status'])),
       }
       return snap
     }),
     sections,
-    extras: rest as Record<string, unknown>,
+    extras: sanitizeKeys(rest) as Record<string, unknown>,
   }
 }
 

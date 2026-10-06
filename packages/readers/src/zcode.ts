@@ -80,8 +80,9 @@ export function parseZcodeSession(sessionId: string, dbPath: string = DB_PATH): 
         if (pd.type === 'text' && pd.text) {
           turns.push(makeTurn({ role, text: pd.text, cwd, ts }))
         } else if (pd.type === 'reasoning' && pd.text) {
-          // 思考流含大量决策信号（"我采用 X 因为 Y"），按 assistant 轮保留
-          turns.push(makeTurn({ role: 'assistant', text: pd.text.slice(0, 4000), cwd, ts }))
+          // 思考流含大量决策信号（"我采用 X 因为 Y"），按 assistant 轮保留；
+          // 与 claude 适配器同一 [thinking] 前缀约定——下游蒸馏可识别并剔除，不再无标记混入正文
+          turns.push(makeTurn({ role: 'assistant', text: '[thinking] ' + pd.text.slice(0, 4000), cwd, ts }))
         } else if (pd.type === 'tool') {
           const failed = pd.state?.status === 'error'
           const input = typeof pd.state?.input === 'object' && pd.state?.input !== null
