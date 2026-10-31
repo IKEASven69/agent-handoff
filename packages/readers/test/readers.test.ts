@@ -1,7 +1,8 @@
 /**
- * readers 单测：八家适配器喂最小真实形态样例出预期 Turn 流；
+ * readers 单测：九家适配器喂最小真实形态样例出预期 Turn 流；
  * zcode / cursor store 用 node:sqlite 造临时库（零 better-sqlite3）；引用解析歧义返回候选。
- * cursor / grok 以 fixtures 为准（本机无真实安装，无实机验证）。
+ * cursor / grok 以 fixtures 为准（本机无真实安装，无实机验证）；
+ * gemini 全部手工构造临时目录 fixture（新旧双格式 / 子代理嵌套 / 坏行跳过 / 中文），不依赖真实安装。
  * 运行：pnpm test（node --import tsx --test test/readers.test.ts）
  */
 import { test } from 'node:test'
@@ -25,12 +26,16 @@ import {
   decodeCursorBlob,
   parseGrokSession,
   parseGrokUpdatesText,
+  parseGeminiText,
+  parseGeminiJson,
+  parseGeminiSession,
   type SessionRef,
 } from '../src/index.js'
 import { claudeAdapter } from '../src/claude.js'
 import { workbuddyAdapter } from '../src/workbuddy.js'
 import { cursorAdapter } from '../src/cursor.js'
 import { grokAdapter } from '../src/grok.js'
+import { geminiAdapter } from '../src/gemini.js'
 import { opencodeAdapter as opencodeAdapterReal } from '../src/opencode.js'
 import { FAKE_ZERO_NOTE } from '../src/types.js'
 
@@ -43,7 +48,7 @@ function assertSentinel(note: string | undefined, label: string): void {
  * 假 0 哨兵测试基建：适配器 ROOT 是模块加载时读的环境变量常量，
  * 用「设 env + query 串 bust 缓存」拿一份以临时目录为根的新鲜模块实例。
  */
-async function freshAdapter<T>(module: 'codex' | 'cursor' | 'grok' | 'opencode', envKey: string, root: string, query: string): Promise<T> {
+async function freshAdapter<T>(module: 'codex' | 'cursor' | 'grok' | 'opencode' | 'gemini', envKey: string, root: string, query: string): Promise<T> {
   process.env[envKey] = root
   try {
     const m = await import(`../src/${module}.ts?sentinel-${module}-${query}`)
@@ -546,6 +551,178 @@ test('sentinel: opencode storage/ 在但 0 会话 → 哨兵（只针对 storage
     writeFileSync(join(dir, 'storage', 'session', 'proj1', 'ses_1.json'), JSON.stringify({ id: 'ses_1', title: 't' }), 'utf8')
     assert.equal(adapterB.discover().length, 1)
     assert.notEqual(adapterB.note, FAKE_ZERO_NOTE)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// ── gemini：新 JSONL 双格式（metadata 首行 + MessageRecord + 控制行/坏行跳过）──
+
+test('gemini_parse_jsonl_new_format', () => {
+  const text = [
+    // 首行 metadata：不产生 Turn
+    JSON.stringify({ sessionId: 'ses-g1', startTime: '2026-10-02T09:00:00Z', lastUpdated: '2026-10-02T09:05:00Z', summary: '修登录页', directories: ['D:\\proj'], kind: 'main' }),
+    // 用户消息（中文）
+    JSON.stringify({ type: 'user', content: '帮我修一下登录页的报错', timestamp: '2026-10-02T09:00:01Z' }),
+    // 斜杠命令 / 快捷输入：不是用户轮
+    JSON.stringify({ type: 'user', content: '/help', timestamp: '2026-10-02T09:00:02Z' }),
+    JSON.stringify({ type: 'user', content: '?', timestamp: '2026-10-02T09:00:03Z' }),
+    // info / warning / error：CLI UI 消息，不计用户轮也不进 Turn
+    JSON.stringify({ type: 'info', content: '正在加载扩展' }),
+    JSON.stringify({ type: 'warning', content: '配额告警' }),
+    JSON.stringify({ type: 'error', content: '上游超时' }),
+    // gemini 文本轮（中文，Part 数组）
+    JSON.stringify({ type: 'gemini', content: [{ text: '我先看看代码' }], timestamp: '2026-10-02T09:01:00Z' }),
+    // gemini 工具轮：write_file（文件类）+ run_shell_command（命令类），结果轮跟随
+    JSON.stringify({ type: 'gemini', content: [{ text: '改好了，跑下测试' }], toolCalls: [
+      { name: 'write_file', args: { file_path: 'src/login.ts', content: '...' }, result: '写入成功', status: 'success', timestamp: '2026-10-02T09:01:30Z' },
+      { name: 'run_shell_command', args: { command: 'pnpm test' }, result: '3 passed', status: 'success', timestamp: '2026-10-02T09:02:00Z' },
+    ], timestamp: '2026-10-02T09:01:20Z' }),
+    // 失败态工具调用：status==='error' → toolFailed
+    JSON.stringify({ type: 'gemini', toolCalls: [
+      { name: 'read_file', args: { file_path: 'src/missing.ts' }, result: 'No such file', status: 'error', timestamp: '2026-10-02T09:03:00Z' },
+    ], timestamp: '2026-10-02T09:02:50Z' }),
+    // $patch / $set / $rewindTo 控制行 + 未知行：跳过
+    JSON.stringify({ $patch: { messages: [] } }),
+    JSON.stringify({ $set: { summary: '修登录页（更新）' } }),
+    JSON.stringify({ $rewindTo: 3 }),
+    JSON.stringify({ type: '$patch', payload: {} }),
+    JSON.stringify({ someFutureRecord: true }),
+    '{broken-json',
+    '',
+  ].join('\n')
+  const turns = parseGeminiText(text, 'D:\\proj')
+  assert.deepEqual(turns.map((t) => t.role), [
+    'user', 'assistant', 'assistant', 'assistant', 'tool', 'assistant', 'tool', 'assistant', 'tool',
+  ])
+  assert.equal(turns[0]!.text, '帮我修一下登录页的报错')
+  assert.equal(turns[0]!.cwd, 'D:\\proj')
+  assert.equal(turns[0]!.ts, '2026-10-02T09:00:01Z')
+  assert.equal(turns[1]!.text, '我先看看代码')
+  assert.equal(turns[2]!.text, '改好了，跑下测试')
+  assert.equal(turns[3]!.toolName, 'write_file')
+  assert.equal(turns[3]!.text, 'write_file: src/login.ts')
+  assert.equal(turns[4]!.text, '写入成功')
+  assert.equal(turns[4]!.toolFailed, false)
+  assert.equal(turns[5]!.toolName, 'run_shell_command')
+  assert.equal(turns[5]!.text, 'pnpm test')
+  assert.equal(turns[8]!.toolName, 'read_file')
+  assert.equal(turns[8]!.toolFailed, true)
+  assert.ok(!turns.some((t) => t.text.includes('/help') || t.text.includes('配额告警') || t.text.includes('上游超时')), '斜杠命令与 info/warning/error 不进 Turn')
+})
+
+// ── gemini：旧 .json 整块格式（metadata+messages 单对象，中文）────────
+
+test('gemini_parse_old_json_format', () => {
+  const legacy = {
+    sessionId: 'ses-old',
+    startTime: '2026-09-20T10:00:00Z',
+    lastUpdated: '2026-09-20T10:02:00Z',
+    summary: '旧格式会话',
+    directories: ['D:\\legacy'],
+    messages: [
+      { type: 'user', content: '盘点一下旧格式（中文）', timestamp: '2026-09-20T10:00:01Z' },
+      { type: 'user', content: '/init', timestamp: '2026-09-20T10:00:02Z' },
+      { type: 'gemini', content: [{ text: '旧格式也读得出' }], timestamp: '2026-09-20T10:01:00Z' },
+      { type: 'gemini', toolCalls: [
+        { name: 'replace', args: { file_path: 'old.ts', old_string: 'a', new_string: 'b' }, result: '工具执行失败', status: 'error', timestamp: '2026-09-20T10:02:00Z' },
+      ], timestamp: '2026-09-20T10:01:50Z' },
+      { type: 'info', content: '存档完成' },
+      '{embedded-broken',
+    ],
+  }
+  const turns = parseGeminiJson(JSON.stringify(legacy), 'D:\\legacy')
+  assert.deepEqual(turns.map((t) => t.role), ['user', 'assistant', 'assistant', 'tool'])
+  assert.equal(turns[0]!.text, '盘点一下旧格式（中文）')
+  assert.equal(turns[2]!.toolName, 'replace')
+  assert.equal(turns[2]!.text, 'replace: old.ts')
+  assert.equal(turns[3]!.toolFailed, true)
+  // 损坏 .json：空流不 throw
+  assert.deepEqual(parseGeminiJson('{nope'), [])
+  assert.deepEqual(parseGeminiJson('[]'), [])
+})
+
+// ── gemini：发现层——双后缀 + 子代理嵌套 + slug/sha256 项目标识 + .project_root ──
+
+test('gemini_discover_dual_format_subagent_and_cwd', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gemini-disc-'))
+  try {
+    const root = join(dir, 'tmp') // 目录名叫 tmp，对齐真实布局（cwd 反查不越界）
+    const slug = join(root, 'my-project') // slug 形项目标识
+    const hashed = join(root, 'a'.repeat(64)) // 旧 sha256 形项目标识
+    const slugChats = join(slug, 'chats')
+    const subDir = join(slugChats, 'ab12cd34') // 子代理嵌套层
+    const hashedChats = join(hashed, 'chats')
+    mkdirSync(subDir, { recursive: true })
+    mkdirSync(hashedChats, { recursive: true })
+    mkdirSync(join(hashed, 'notchats'), { recursive: true })
+    writeFileSync(join(slug, '.project_root'), 'D:\\工作区\\新项目\n', 'utf8')
+
+    const metaLine = (extra: Entry): string => JSON.stringify({ sessionId: 'x', kind: 'main', ...extra })
+    // 新 JSONL（slug 项目）：summary 作标题
+    writeFileSync(join(slugChats, 'session-1000-abcd1234.jsonl'), [
+      metaLine({ sessionId: 'ses-a', summary: '修登录页', lastUpdated: '2026-10-02T09:05:00Z' }),
+      JSON.stringify({ type: 'user', content: '第一条' }),
+    ].join('\n') + '\n', 'utf8')
+    // 旧 .json（sha256 项目）：无 .project_root → cwd 留空
+    writeFileSync(join(hashedChats, 'session-1001-1234abcd.json'), JSON.stringify({
+      sessionId: 'ses-b', summary: '老项目', lastUpdated: '2026-09-20T10:00:00Z', messages: [],
+    }), 'utf8')
+    // 子代理会话：chats/<parentShortId>/ 再嵌一层，kind='subagent'
+    writeFileSync(join(subDir, 'session-1002-aaaabbbb.jsonl'), [
+      metaLine({ sessionId: 'ses-c', kind: 'subagent', lastUpdated: '2026-10-01T08:00:00Z' }),
+      JSON.stringify({ type: 'user', content: '子代理任务' }),
+    ].join('\n') + '\n', 'utf8')
+    // 诱饵：非 session- 前缀、非双后缀、错层（不在 chats/ 下）——都不发现
+    writeFileSync(join(slugChats, 'notes.json'), '{}', 'utf8')
+    writeFileSync(join(slugChats, 'session-1003-xxxxxxxx.txt'), 'not a session', 'utf8')
+    writeFileSync(join(hashed, 'notchats', 'session-1004-zzzzzzzz.jsonl'), '{}', 'utf8')
+
+    const adapter = await freshAdapter<typeof geminiAdapter>('gemini', 'HANDOFF_ROOT_GEMINI', root, 'dual')
+    const refs = adapter.discover()
+    assert.equal(refs.length, 3, `slug/.jsonl + sha256/.json + 子代理嵌套各一，got ${JSON.stringify(refs.map((r) => r.id))}`)
+    // 按更新时间倒序：1000(10-02) > 1002(10-01) > 1001(09-20)；子代理无 summary → 标题回退文件名
+    assert.deepEqual(refs.map((r) => r.title), ['修登录页', 'session-1002-aaaabbbb.jsonl', '老项目'])
+    const main = refs.find((r) => r.id.endsWith('session-1000-abcd1234.jsonl'))!
+    assert.equal(main.title, '修登录页', 'summary 作标题')
+    assert.equal(main.cwd, 'D:\\工作区\\新项目', '.project_root 明文反查（去尾换行）')
+    const sub = refs.find((r) => r.id.endsWith('session-1002-aaaabbbb.jsonl'))!
+    assert.equal(sub.cwd, 'D:\\工作区\\新项目', '子代理沿父目录反查到项目 .project_root')
+    const oldJson = refs.find((r) => r.id.endsWith('session-1001-1234abcd.json'))!
+    assert.equal(oldJson.title, '老项目')
+    assert.equal(oldJson.cwd, '', '读不到 .project_root 留空（调用方有空 cwd 警告兜底）')
+    assert.ok(oldJson.updatedAt < sub.updatedAt, 'lastUpdated 参与 updatedAt 排序')
+
+    // adapter.parse 走同一条 cwd 反查：主会话 / 子代理 / 缺文件
+    const mainTurns = adapter.parse(main.id)
+    assert.equal(mainTurns.length, 1)
+    assert.equal(mainTurns[0]!.cwd, 'D:\\工作区\\新项目')
+    const subTurns = parseGeminiSession(sub.id)
+    assert.equal(subTurns[0]!.cwd, 'D:\\工作区\\新项目')
+    assert.deepEqual(parseGeminiSession(join(dir, 'absent', 'session-1-a.jsonl')), [])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// ── gemini：假 0 哨兵（根存在 0 会话 → 哨兵；根缺席 → 正常静默）────────
+
+test('sentinel: gemini 根存在但 0 会话 → 哨兵；有数据 → note 保持空', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sentinel-gemini-'))
+  try {
+    const root = join(dir, 'tmp')
+    mkdirSync(join(root, 'proj', 'chats'), { recursive: true })
+    const adapter = await freshAdapter<typeof geminiAdapter>('gemini', 'HANDOFF_ROOT_GEMINI', root, 'empty')
+    assert.deepEqual(adapter.discover(), [])
+    assertSentinel(adapter.note, 'gemini 空根')
+    // 有数据：哨兵撤下
+    writeFileSync(join(root, 'proj', 'chats', 'session-1-abcd1234.jsonl'), JSON.stringify({ type: 'user', content: 'hi' }) + '\n', 'utf8')
+    assert.equal(adapter.discover().length, 1)
+    assert.equal(adapter.note, undefined)
+    // 根不存在：没装 = 正常静默，不触发哨兵
+    const adapter2 = await freshAdapter<typeof geminiAdapter>('gemini', 'HANDOFF_ROOT_GEMINI', join(dir, 'absent'), 'missing')
+    assert.deepEqual(adapter2.discover(), [])
+    assert.equal(adapter2.note, undefined)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

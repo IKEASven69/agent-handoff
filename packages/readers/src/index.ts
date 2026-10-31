@@ -1,7 +1,7 @@
 /**
- * @agent-handoff/readers：八家 agent 会话的只读读取层。
+ * @agent-handoff/readers：九家 agent 会话的只读读取层。
  * 移植自 dsh-hippo src/agents/，零三方运行时依赖（zcode / cursor store 用 Node 内建 node:sqlite）。
- * cursor / grok 两家为自研实现（格式为公开逆向调研）。
+ * cursor / grok / gemini 三家为自研实现（格式为公开逆向调研）。
  *
  * 公共 API：
  *   listSessions(agent?) → SessionRef[]   发现 + 按更新时间倒序
@@ -20,6 +20,7 @@ import { piAdapter } from './pi.js'
 import { workbuddyAdapter } from './workbuddy.js'
 import { cursorAdapter } from './cursor.js'
 import { grokAdapter } from './grok.js'
+import { geminiAdapter } from './gemini.js'
 
 export const AGENTS: SessionAdapter[] = [
   claudeAdapter,
@@ -30,6 +31,7 @@ export const AGENTS: SessionAdapter[] = [
   workbuddyAdapter,
   cursorAdapter,
   grokAdapter,
+  geminiAdapter,
 ]
 
 const byName = new Map(AGENTS.map((a) => [a.name, a]))
@@ -170,3 +172,4 @@ export { parseZcodeSession } from './zcode.js'
 export { parsePiText } from './pi.js'
 export { parseCursorTranscriptText, parseCursorStore, renderCursorValue, decodeCursorBlob } from './cursor.js'
 export { parseGrokSession, parseGrokUpdatesText } from './grok.js'
+export { parseGeminiSession, parseGeminiText, parseGeminiJson } from './gemini.js'
