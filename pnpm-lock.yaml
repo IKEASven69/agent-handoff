@@ -203,6 +203,25 @@ importers:
         specifier: ^7.0.2
         version: 7.0.2
 
+  packages/pickup:
+    dependencies:
+      '@agent-handoff/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@types/node':
+        specifier: ^26.6.3
+        version: 26.6.3
+      tsdown:
+        specifier: ^0.23.0
+        version: 0.23.0(tsx@4.23.15)(typescript@7.0.2)
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
   packages/readers:
     devDependencies:
       '@types/node':

@@ -1,0 +1,29 @@
+{
+  "name": "handoff-pickup",
+  "version": "0.1.0",
+  "description": "handoff: 1 协议的独立取件/写卡 CLI：列 pending / load 消费即弃 / save 薄守门 / skill 写纪律",
+  "type": "module",
+  "bin": {
+    "handoff-pickup": "./dist/cli.mjs",
+    "pickup": "./dist/cli.mjs"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "test": "node --import tsx --test test/pickup.test.ts"
+  },
+  "dependencies": {
+    "@agent-handoff/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "tsdown": "^0.23.0"
+  }
+}
